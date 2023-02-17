@@ -1,10 +1,13 @@
-# Web interface for webrtcfs
+# (WIP) Web interface for webrtcfs
 
-WebRTC の DataCnannel 上でファイルを共有する実験的なファイルシステムです．
+[webrtcfs](https://github.com/binzume/webrtcfs) のWebインターフェイス版です。
 
+Demo page: https://binzume.github.io/webrtcfs-web/
+
+作りかけです。接続のための設定機能すら無いので、webrtcfs と https://binzume.github.io/webrtc-rdp/ を接続してからアクセスしてください。
 
 - CLI tools: https://github.com/binzume/webrtcfs
-- WebXR: https://github.com/binzume/webrtc-rdp
+- WebXR Remote Desktop: https://github.com/binzume/webrtc-rdp
 
 # License
 

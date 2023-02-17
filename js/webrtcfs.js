@@ -3,7 +3,6 @@
 
 // Please replace with your id and signalingKey!
 const signalingUrl = 'wss://ayame-labo.shiguredo.app/signaling';
-const signalingKey = 'VV69g7Ngx-vNwNknLhxJPHs9FpRWWNWeUzJ9FUyylkD_yc_F';
 const roomIdPrefix = 'binzume@rdp-room-';
 
 class BaseConnection {
@@ -338,7 +337,7 @@ class RtcfsFileListLoader {
 	globalThis.fileListLoader = new RtcfsFileListLoader('', storageList);
 	globalThis.sideMenuListLoader = new RtcfsFileListLoader('', storageList);
 
-	function add(roomId, password, name) {
+	function add(roomId, signalingKey, password, name) {
 		let client = new RTCFileSystemClient();
 		let player = null;
 		storageList.addStorage(name, {
@@ -372,7 +371,10 @@ class RtcfsFileListLoader {
 	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || {devices: []};
 	let devices = config.devices != null ? config.devices : [config];
 	for (let device of devices) {
-		add(device.roomId, device.token, device.roomId);
+		let name = device.roomId.startsWith(roomIdPrefix) ? device.roomId.substring(roomIdPrefix.length) : device.roomId;
+		if (device.userAgent.match(/^[^\/\\\?&!\"\']{0,64}$/)) {
+			name = device.userAgent;
+		}
+		add(device.roomId, device.signalingKey, device.token, name);
 	}
-
 })();

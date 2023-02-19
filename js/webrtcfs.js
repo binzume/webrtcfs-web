@@ -81,7 +81,7 @@ class BaseConnection {
 		for (let c of Object.values(this.dataChannels)) {
 			c.ch = null;
 		}
-		this.updateState('disconnected');
+		this.updateState('disconnected', reason);
 	}
 	dispose() {
 		this.disconnect('dispose');
@@ -91,13 +91,14 @@ class BaseConnection {
 	}
 	/**
 	 * @param {'disconnected' | 'connecting' | 'waiting' | 'disposed' | 'connected'} s
+	 * @param {string|null} reason 
 	 */
-	updateState(s) {
+	updateState(s, reason = null) {
 		if (s != this.state && this.state != 'disposed') {
 			console.log(this.roomId, s);
 			let oldState = this.state;
 			this.state = s;
-			this.onstatechange && this.onstatechange(s, oldState);
+			this.onstatechange && this.onstatechange(s, oldState, reason);
 		}
 	}
 	/**
@@ -143,13 +144,13 @@ class FsClientConnection extends BaseConnection {
 					let key = await crypto.subtle.importKey('raw', enc.encode(this.authToken),
 						{ name: 'HMAC', hash: { name: 'SHA-256' } }, false, ['sign']);
 					let sign = await crypto.subtle.sign('HMAC', key, enc.encode(localFingerprint));
-					this.authToken && ch.send(JSON.stringify({
+					ch.send(JSON.stringify({
 						type: "auth",
 						fingerprint: localFingerprint,
 						hmac: btoa(String.fromCharCode(...new Uint8Array(sign)))
 					}));
-				} else {
-					this.authToken && ch.send(JSON.stringify({ type: "auth", token: this.authToken }));
+				} else if (this.authToken) {
+					ch.send(JSON.stringify({ type: "auth", token: this.authToken }));
 				}
 			},
 			onmessage: (ch, ev) => {
@@ -361,6 +362,11 @@ class RtcfsFileListLoader {
 						}
 						client.setAvailable(true);
 					};
+					player.onstatechange = (state, oldState, reason) => {
+						if (state == 'disconnected' && reason != 'dispose') {
+							player = null;
+						}
+					};
 					player.connect();
 				}
 				return new RTCFileSystemClientFolder(client, folder, folder || name, options);
@@ -368,13 +374,10 @@ class RtcfsFileListLoader {
 		});
 	}
 
-	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || {devices: []};
+	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || { devices: [] };
 	let devices = config.devices != null ? config.devices : [config];
 	for (let device of devices) {
-		let name = device.roomId.startsWith(roomIdPrefix) ? device.roomId.substring(roomIdPrefix.length) : device.roomId;
-		if (device.userAgent.match(/^[^\/\\\?&!\"\']{0,64}$/)) {
-			name = device.userAgent;
-		}
+		let name = (device.name || device.userAgent || device.roomId).replace(/[\/\\\?&!\"\']+/, '_').substring(0, 64);
 		add(device.roomId, device.signalingKey, device.token, name);
 	}
 })();

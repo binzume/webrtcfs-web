@@ -146,17 +146,18 @@ class FsClientConnection extends BaseConnection {
 					let sign = await crypto.subtle.sign('HMAC', key, enc.encode(localFingerprint));
 					ch.send(JSON.stringify({
 						type: "auth",
+						requestServices: ['file'],
 						fingerprint: localFingerprint,
 						hmac: btoa(String.fromCharCode(...new Uint8Array(sign)))
 					}));
 				} else if (this.authToken) {
-					ch.send(JSON.stringify({ type: "auth", token: this.authToken }));
+					ch.send(JSON.stringify({ type: "auth", token: this.authToken, requestServices: ['file'] }));
 				}
 			},
 			onmessage: (ch, ev) => {
 				let msg = JSON.parse(ev.data);
 				if (msg.type == 'redirect' && msg.roomId) {
-					this.disconnect();
+					this.disconnect('redirect');
 					this.roomId = msg.roomId;
 					this.connect();
 				} else if (msg.type == 'authResult') {
@@ -363,7 +364,7 @@ class RtcfsFileListLoader {
 						client.setAvailable(true);
 					};
 					player.onstatechange = (state, oldState, reason) => {
-						if (state == 'disconnected' && reason != 'dispose') {
+						if (state == 'disconnected' && reason != 'redirect' && reason != 'dispose') {
 							player = null;
 						}
 					};

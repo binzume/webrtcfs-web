@@ -921,11 +921,21 @@ class FileListView {
 		let openLink = mkEl('a', shortName, { 'title': f.name, 'href': url || f.path, 'className': 'openLink' });
 		let date = mkEl('span', formatDate(f.updatedTime), { className: 'date' });
 		let optionEls = [];
+		let downloadBlob = (ev) => {
+			ev.preventDefault();
+			(async () => {
+				let url = URL.createObjectURL(await (await f.fetch()).blob());
+				el.appendChild(mkEl('a', '', { target: '_blank', href: url, download: f.name, style: 'display:none;' })).click();
+				URL.revokeObjectURL(url);
+			})();
+		};
 		let onclick = function (ev) {
 			if (openItem(f)) {
 				ev.preventDefault();
+			} else if (!f.url && f.fetch) {
+				downloadBlob(ev);
 			}
-		}
+		};
 		if (f.type == 'folder' || f.type == 'archive' || f.type == 'list') {
 			let play = (ev) => {
 				ev.preventDefault();
@@ -951,9 +961,11 @@ class FileListView {
 		if (f.type != 'folder' && !f.type.startsWith('link/')) {
 			thumbLink.onclick = onclick;
 			openLink.onclick = onclick;
-			thumbLink.target = '_blank'
-			openLink.target = '_blank'
-			optionEls.push(mkEl('li', mkEl('a', 'Download', { 'target': '_blank', 'href': f.url, 'title': 'Download' })));
+			thumbLink.target = '_blank';
+			openLink.target = '_blank';
+			let dlEl = mkEl('a', 'Download', { 'target': '_blank', 'href': f.url, download: f.name, 'title': 'Download' });
+			if (!f.url && f.fetch) { dlEl.onclick = downloadBlob; }
+			optionEls.push(mkEl('li', dlEl));
 		}
 		let el = mkEl('li', [thumbLink, date, openLink]);
 		if (optionEls.length > 0) {

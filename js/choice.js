@@ -26,7 +26,7 @@ function formatTime(t) {
 
 function formatDate(s) {
 	let t = new Date(s);
-	if (t.getTime() <= 0) {
+	if (!s || t.getTime() <= 0) {
 		return '';
 	}
 	let d2 = n => (n > 9 ? '' : '0') + n;

@@ -378,7 +378,7 @@ class RtcfsFileListLoader {
 	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || { devices: [] };
 	let devices = config.devices != null ? config.devices : [config];
 	for (let device of devices) {
-		let name = (device.name || device.userAgent || device.roomId).replace(/[\/\\\?&!\"\']+/, '_').substring(0, 64);
+		let name = (device.name || device.userAgent || device.roomId).replace(/[\/\\\?&!\"\']+/g, '_').substring(0, 64);
 		add(device.roomId, device.signalingKey, device.token, name);
 	}
 })();

@@ -108,41 +108,41 @@ class MediaPlayer {
 		this.contentEl = el.querySelector('.media-player-content');
 	}
 	open(item) {
-		console.log(item);
 		this.el.style.display = 'block';
 		this.el.classList.add('loading');
 		if (!this.el.classList.contains('small')) {
 			document.body.classList.add('lockscroll');
 		}
-
 		this._clearMediaEl();
-		let content;
+		if (Array.isArray(item)) {
+			let container = this.contentEl.appendChild(mkEl('div'));
+			item.forEach(i => this._createEl(i, container));
+		} else {
+			this._createEl(item, this.contentEl);
+		}
+		this.contentEl.focus();
+	}
+	_createEl(item, parent) {
 		let type = item.type.split('/', 2)[0];
-		let url = item.url;
+		let content;
 		if (type == 'image') {
 			this.el.classList.remove('playable');
-			if (!Array.isArray(item)) {
-				content = mkEl('img', [], { src: url || '' });
-				if (url == null && item.fetch) {
-					(async () => {
-						let url = URL.createObjectURL(await (await item.fetch()).blob());
-						content.addEventListener('load', (ev) => {
-							URL.revokeObjectURL(url);
-						}, { once: true });
-						content.src = url;
-					})();
-				}
-				content.addEventListener('load', (ev) => {
-					this.el.classList.remove('loading');
-				});
-				content.addEventListener('error', (ev) => {
-					this.el.classList.remove('loading');
-				});
-			} else {
-				content = mkEl('div');
-				item.forEach((u) => { content.appendChild(mkEl('img', [], { src: u.url })) });
-				this.el.classList.remove('loading');
+			content = mkEl('img', [], { src: item.url || '' });
+			if (item.url == null && item.fetch) {
+				(async () => {
+					let url = URL.createObjectURL(await (await item.fetch()).blob());
+					content.addEventListener('load', (ev) => {
+						URL.revokeObjectURL(url);
+					}, { once: true });
+					content.src = url;
+				})();
 			}
+			content.addEventListener('load', (ev) => {
+				this.el.classList.remove('loading');
+			});
+			content.addEventListener('error', (ev) => {
+				this.el.classList.remove('loading');
+			});
 		} else {
 			this.el.classList.add('playable');
 			let tag = type == 'audio' ? 'audio' : 'video';
@@ -171,8 +171,7 @@ class MediaPlayer {
 			this.mediaEl = content;
 			content.play();
 		}
-		this.contentEl.appendChild(content);
-		this.contentEl.focus();
+		return parent.appendChild(content);
 	}
 	playPause() {
 		if (!this.mediaEl) return;
@@ -637,62 +636,8 @@ class ContentInfoView {
 	}
 }
 
-class RecentList {
-	constructor(name) {
-		this.name = name;
-		this.items = [];
-		this.limit = 20;
-		this.onupdated = null;
-		this.editable = true;
-		this._load();
-	}
-	addItem(item) {
-		if (item.path) {
-			let idx = this.items.findIndex(i => i.path == item.path);
-			if (idx >= 0) {
-				return;
-			}
-		}
-		this.items.unshift(item);
-		this.items = this.items.slice(0, this.limit);
-		if (this.onupdated) {
-			this.onupdated(this.items, this);
-		}
-		this._save();
-	}
-	remove(item) {
-		if (item.path) {
-			let idx = this.items.findIndex(i => i.path == item.path);
-			if (idx >= 0) {
-				this.items.splice(idx, 1);
-				this._save();
-				return true;
-			}
-		}
-		return false;
-	}
-	clear() {
-		this.items = [];
-		if (this.onupdated) {
-			this.onupdated(this.items);
-		}
-		this._save();
-	}
-	_load() {
-		try {
-			this.items = JSON.parse(localStorage.getItem(this.name) || '[]');
-		} catch (e) {
-			// ignore
-		}
-	}
-	_save() {
-		localStorage.setItem(this.name, JSON.stringify(this.items));
-	}
-}
-
 let mediaPlayerController = new MediaPlayerController();
 let sideMenuListView = null;
-let recentVolumes = new RecentList('recentVolumes');
 
 function isPlayable(item) {
 	let t = item.type.split('/')[0];
@@ -772,6 +717,9 @@ class SideMenuListView {
 }
 
 class FileListView {
+	/**
+	 * @param {FileListLoader} listLoader 
+	 */
 	constructor(listLoader) {
 		this.el = document.getElementById('main-pane');
 		this.listEl = document.getElementById('item-list');
@@ -871,7 +819,7 @@ class FileListView {
 	_onGetItemsResult(result) {
 		let path = this.listLoader.path;
 		this.el.classList.remove('loading');
-		if (!result) {
+		if (!result || result.items == null) {
 			setError('Failed to load file list.');
 			return;
 		}
@@ -884,13 +832,6 @@ class FileListView {
 				let namePath = result.name.split('/');
 				if (namePath.length > 0 && links.length >= namePath.length) {
 					links[links.length - namePath.length].innerText = namePath[0];
-					let paths = path.split('/');
-					recentVolumes.addItem({
-						type: 'folder',
-						path: 'volumes/' + paths[1],
-						name: namePath[0],
-						updatedTime: new Date().getTime()
-					});
 				}
 			}
 		}

@@ -333,6 +333,9 @@ class RtcfsFileListLoader {
 			next: eol ? null : (offset || 0) + items.length,
 		};
 	}
+	getSubList(path) {
+		return new RtcfsFileListLoader(path, this.storageList);
+	}
 }
 
 (function () {

@@ -26,27 +26,17 @@ function formatTime(t) {
 
 function formatDate(s) {
 	let t = new Date(s);
-	if (!s || t.getTime() <= 0) {
-		return '';
-	}
+	if (!s || t.getTime() <= 0) { return ''; }
 	let d2 = n => (n > 9 ? '' : '0') + n;
 	return [t.getFullYear(), d2(t.getMonth() + 1), d2(t.getDate())].join('-') + ' ' +
 		[d2(t.getHours()), d2(t.getMinutes())].join(':');
 }
 
 function formatSize(size) {
-	if (size == null) {
-		return '';
-	}
-	if (size > 1024 * 1024 * 1024 * 10) {
-		return (size / (1024 * 1024 * 1024) | 0) + 'GiB';
-	}
-	if (size > 1024 * 1024 * 10) {
-		return (size / (1024 * 1024) | 0) + 'MiB';
-	}
-	if (size > 1024 * 10) {
-		return (size / (1024) | 0) + 'KiB';
-	}
+	if (size == null) { return ''; }
+	if (size > 1024 * 1024 * 1024 * 10) { return (size / (1024 * 1024 * 1024) | 0) + 'GiB'; }
+	if (size > 1024 * 1024 * 10) { return (size / (1024 * 1024) | 0) + 'MiB'; }
+	if (size > 1024 * 10) { return (size / (1024) | 0) + 'KiB'; }
 	return size + 'B'
 }
 
@@ -61,16 +51,12 @@ function initPinchZoom(el, minScale = 0.5, maxScale = 8) {
 	});
 	let state = { dx: 0, dy: 0, scale: 1 }, last = null;
 	el.addEventListener('touchstart', (ev) => {
-		if (ev.touches.length != 2) {
-			return;
-		}
+		if (ev.touches.length != 2) { return; }
 		ev.preventDefault();
 		last = getPinch(ev);
 	});
 	el.addEventListener('touchmove', (ev) => {
-		if (ev.touches.length != 2) {
-			return;
-		}
+		if (ev.touches.length != 2) { return; }
 		ev.preventDefault();
 		let rect = el.getBoundingClientRect();
 		let pinch = getPinch(ev);
@@ -99,7 +85,7 @@ class MediaPlayer {
 		this.el = el;
 		/** @type {HTMLMediaElement|null} */
 		this.mediaEl = null;
-		this.continuous = true;
+		this.continuousPlay = true;
 		this.muted = false;
 		this.loop = false;
 		this.playbackRate = 1.0;
@@ -223,11 +209,7 @@ class MediaPlayer {
 		return (document.fullscreenElement || document.webkitFullscreenElement) == this.el;
 	}
 	toggleFullscreen() {
-		if (this.isFullscreen()) {
-			this.exitFullscreen();
-		} else {
-			this.fullscreen();
-		}
+		this.isFullscreen() ? this.exitFullscreen() : this.fullscreen();
 	}
 	isActive() {
 		return this.el.style.display == 'block';
@@ -255,15 +237,15 @@ class FileListLoader {
 	async load(offset, signal) {
 		let url = this._url(offset);
 		let r = await (await fetch(url, { signal: signal })).json();
-		if (url != this._url(offset)) {
-			return;
-		}
 		if (r.writable) {
 			for (let item of r.items) {
 				item.remove = () => fetch(apiUrl + item.path, { method: 'DELETE' });
 			}
 		}
 		return r;
+	}
+	getSubList(path) {
+		return new FileListLoader(path);
 	}
 	_url(offset) {
 		return apiUrl + this.path + '?offset=' + offset + '&order=' + this.sortOrder + '&orderBy=' + this.sortField;
@@ -383,7 +365,7 @@ class MediaPlayerController {
 		});
 
 		mediaPlayer.onEnded = (player) => {
-			if (player.continuous) {
+			if (player.continuousPlay) {
 				clearTimeout(this.timeout);
 				let dismiss = (ev) => {
 					window.removeEventListener('click', dismiss, true);
@@ -482,64 +464,60 @@ class MediaPlayerController {
 		}
 		switch (ev.code) {
 			case 'KeyT':
-				ev.preventDefault();
 				this.toggleSpreadMode();
-				break;
+				return true;
 			case 'ArrowRight':
-				ev.preventDefault();
 				if (mediaPlayer.mediaEl && !ev.shiftKey) {
 					mediaPlayer.mediaEl.currentTime += 10;
 				} else {
 					this.next();
 				}
-				break;
+				return true;
 			case 'ArrowLeft':
-				ev.preventDefault();
 				if (mediaPlayer.mediaEl && !ev.shiftKey) {
 					mediaPlayer.mediaEl.currentTime -= 10;
 				} else {
 					this.prev();
 				}
-				break;
+				return true;
 			case 'ArrowUp':
 				if (ev.shiftKey) {
-					ev.preventDefault();
 					this.setPlaybackRate(this.mediaPlayer.playbackRate + 0.1);
+					return true;
 				}
 				break;
 			case 'ArrowDown':
 				if (ev.shiftKey) {
-					ev.preventDefault();
 					this.setPlaybackRate(this.mediaPlayer.playbackRate - 0.1);
+					return true;
 				}
 				break;
 			case 'Space':
 				if (!ev.shiftKey) {
-					ev.preventDefault();
 					mediaPlayer.playPause();
+					return true;
 				}
 				break;
 			case 'Enter':
-				ev.preventDefault();
 				mediaPlayer.toggleFullscreen();
-				break;
+				return true;
 			case 'KeyR':
-				ev.preventDefault();
 				if (ev.shiftKey) {
 					mediaPlayer.contentEl.classList.toggle('rotate90');
+					return true;
 				}
 				break;
 			case 'KeyZ':
 				if (ev.shiftKey) {
-					ev.preventDefault();
 					mediaPlayer.toggleSize();
+					return true;
 				}
 				break;
 			case 'Escape':
-				ev.preventDefault();
 				mediaPlayer.hide();
-				break;
+				return true;
 		}
+		return false;
 	}
 	next() {
 		this.cursor.moveOffset(this.spreadMode ? 2 : 1);
@@ -887,7 +865,7 @@ class FileListView {
 		if (f.type == 'folder' || f.type == 'archive' || f.type == 'list') {
 			let play = (ev) => {
 				ev.preventDefault();
-				let loader = new FileListLoader(f.path);
+				let loader = this.listLoader.getSubList(f.path);
 				loader.sortField = 'name';
 				loader.sortOrder = 'a';
 				let cursor = new FileListCursor(loader, isPlayable);
@@ -1115,8 +1093,9 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	}), false);
 
 	// Key event
-	document.addEventListener('keydown', (function (e) {
-		fileListView.handleKeyEvent(e);
-		mediaPlayerController.handleKeyEvent(e);
+	document.addEventListener('keydown', (function (ev) {
+		if (fileListView.handleKeyEvent(ev) || mediaPlayerController.handleKeyEvent(ev)) {
+			ev.preventDefault();
+		}
 	}));
 }));

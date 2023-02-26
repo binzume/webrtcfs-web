@@ -287,7 +287,7 @@ class StorageList extends BaseFileList {
 		let r = order === "a" ? 1 : -1;
 		if (orderBy === "name") {
 			this.items.sort((a, b) => (a.name || "").localeCompare(b.name) * r);
-		} else if (orderBy === "updated") {
+		} else if (orderBy === "updatedTime") {
 			this.items.sort((a, b) => (a.updatedTime || "").localeCompare(b.updatedTime) * r);
 		} else if (orderBy === "size") {
 			this.items.sort((a, b) => ((a.size && b.size) ? a.size - b.size : 0) * r);
@@ -299,10 +299,10 @@ class RtcfsFileListLoader {
 	constructor(path, storageList) {
 		this.path = path || '';
 		this.sortOrder = 'd';
-		this.sortField = 'updated';
+		this.sortField = 'updatedTime';
 		this.storageList = storageList;
 	}
-	async load(offset) {
+	async load(offset, signal) {
 		let path = this.path;
 		let storage = path.split('/', 1)[0];
 		let list = this.storageList.getList(path);
@@ -317,6 +317,7 @@ class RtcfsFileListLoader {
 				break;
 			}
 			let item = await list.get(offset + i);
+			signal.throwIfAborted();
 			if (!item) {
 				eol = true;
 				break;

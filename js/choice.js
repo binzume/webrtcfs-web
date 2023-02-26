@@ -252,9 +252,9 @@ class FileListLoader {
 		this.sortOrder = 'd';
 		this.sortField = 'updated';
 	}
-	async load(offset) {
+	async load(offset, signal) {
 		let url = this._url(offset);
-		let r = await (await fetch(url)).json();
+		let r = await (await fetch(url, { signal: signal })).json();
 		if (url != this._url(offset)) {
 			return;
 		}
@@ -279,16 +279,18 @@ class FileListCursor {
 		this._filter = filter;
 		this._pos = -1;
 		this.finished = false;
-		this.loading = false;
 		this._offset = 0;
+		this._ac = null;
 	}
 	loadNext() {
-		if (this.finished || this.loading) {
+		if (this.finished || this._ac) {
 			return;
 		}
-		this.loading = true;
-		this._loader.load(this._offset).then((r) => {
-			this.loading = false;
+		this._ac = new AbortController();
+		let signal = this._ac.signal;
+		this._loader.load(this._offset, signal).then((r) => {
+			signal.throwIfAborted();
+			this._ac = null;
 			this._offset += r.items.length;
 			this.finished = r.next == null && !r.more;
 			if (r.items) {
@@ -336,6 +338,9 @@ class FileListCursor {
 			return true;
 		}
 		return false;
+	}
+	dispose() {
+		this._ac && this._ac.abort();
 	}
 }
 
@@ -584,15 +589,15 @@ class ImageLoadQueue {
 	clear() {
 		this.queue = [];
 	}
-	_load(ent) {
+	async _load(ent) {
 		this.loading.push(ent);
-		let listener = (ev) => {
+		let listener = (_ev) => {
 			this.loading = this.loading.filter(t => t !== ent);
 			this._checkQueue();
 		};
 		ent.el.addEventListener('error', listener, { once: true });
 		ent.el.addEventListener('load', listener, { once: true });
-		ent.load(ent.el);
+		try { await ent.load(ent.el); } catch (e) { listener(null); }
 	}
 	_checkQueue() {
 		if (this.queue.length > 0 && this.loading.length < this.limit) {
@@ -809,6 +814,7 @@ class FileListView {
 	_refreshItems() {
 		this.listEl.textContent = '';
 		this.imageLoadQueue.clear();
+		this.listCursor.dispose();
 		this.listCursor = new FileListCursor(this.listLoader, isPlayable);
 		mediaPlayerController.setCursor(this.listCursor);
 		this.el.classList.add('loading');
@@ -848,6 +854,7 @@ class FileListView {
 		if (f.thumbnail && f.thumbnail.fetch) {
 			this.imageLoadQueue.add(iconEl, async el => {
 				let url = URL.createObjectURL(await (await f.thumbnail.fetch()).blob());
+				console.log(url);
 				el.addEventListener('load', ev => URL.revokeObjectURL(url), { once: true });
 				el.src = url;
 			});

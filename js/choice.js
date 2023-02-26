@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 const apiUrl = 'api/';
@@ -878,10 +877,7 @@ class FileListView {
 			}
 			let url = '#list:' + encodeURIComponent(f.path).replace('%2F', '/');
 			optionEls.push(mkEl('li', mkEl('a', 'Browse', { 'href': url, 'title': 'Browse' })));
-
-			let playButton = mkEl('button', 'Play All');
-			playButton.addEventListener('click', play);
-			optionEls.push(mkEl('li', playButton));
+			optionEls.push(mkEl('li', mkEl('button', 'Play All', { onclick: play })));
 		}
 
 		if (f.type != 'folder' && !f.type.startsWith('link/')) {
@@ -945,23 +941,23 @@ function search(text) {
 	};
 	text = normalize(text);
 	if (text == '') return [];
+	let foundPrefix = [];
 	let found = [];
-	let found_notprefix = [];
 	let searchItems = function (items) {
 		for (let i = 0; i < items.length; i++) {
 			let t = items[i];
 			let name = normalize(t.name);
 			let pos = name.indexOf(text);
 			if (pos == 0) {
-				found.push(t);
+				foundPrefix.push(t);
 			} else if (pos > 0) {
-				found_notprefix.push(t);
+				found.push(t);
 			}
 		}
 	};
 	searchItems(sideMenuListView.items);
 	mediaPlayerController.cursor && searchItems(mediaPlayerController.cursor.items);
-	return found.concat(found_notprefix);
+	return foundPrefix.concat(found);
 }
 
 function updateSearchResult(items) {
@@ -1021,7 +1017,7 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 
 	window.addEventListener('hashchange', (function (e) {
 		e.preventDefault();
-		checkUrlFragment(fileListView);
+		checkUrlFragment();
 		document.getElementById('search_list').classList.remove('active');
 	}), false);
 
@@ -1067,25 +1063,25 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 
 	// Search
 	let searchTimeout = null;
-	let search_input = document.getElementById('search_keyword');
-	search_input.addEventListener('input', function (ev) {
+	let searchInputEl = /** @type {HTMLInputElement} */(document.getElementById('search_keyword'));
+	searchInputEl.addEventListener('input', function (ev) {
 		clearTimeout(searchTimeout);
 		searchTimeout = setTimeout(function () {
-			updateSearchResult(search(search_input.value));
+			updateSearchResult(search(searchInputEl.value));
 		}, 300);
 	});
-	search_input.addEventListener('focusin', function (ev) {
+	searchInputEl.addEventListener('focusin', function (ev) {
 		searchTimeout = setTimeout(function () {
-			updateSearchResult(search(search_input.value));
+			updateSearchResult(search(searchInputEl.value));
 		}, 300);
 	});
-	search_input.addEventListener('focusout', function (ev) {
+	searchInputEl.addEventListener('focusout', function (ev) {
 		searchTimeout = setTimeout(function () {
 			updateSearchResult([]);
 		}, 300);
 	});
 	document.forms['search'].addEventListener('submit', (function (e) {
-		let q = search_input.value;
+		let q = searchInputEl.value;
 		fileListView.selectList('tags/' + q);
 		document.getElementById('search_list').classList.remove('active');
 		location.href = '#q:' + q;

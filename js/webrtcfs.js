@@ -346,7 +346,8 @@ class RtcfsFileListLoader {
 	function add(roomId, signalingKey, password, name) {
 		let client = new RTCFileSystemClient();
 		let player = null;
-		storageList.addStorage(name, {
+		let id = roomId.startsWith(roomIdPrefix) ? roomId.substring(roomIdPrefix.length) : roomId;
+		storageList.addStorage(id, {
 			name: name,
 			root: '',
 			shortcuts: {},
@@ -382,7 +383,7 @@ class RtcfsFileListLoader {
 	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || { devices: [] };
 	let devices = config.devices != null ? config.devices : [config];
 	for (let device of devices) {
-		let name = (device.name || device.userAgent || device.roomId).replace(/[\/\\\?&!\"\']+/g, '_').substring(0, 64);
+		let name = (device.name || device.userAgent || device.roomId).substring(0, 64);
 		add(device.roomId, device.signalingKey, device.token, name);
 	}
 })();

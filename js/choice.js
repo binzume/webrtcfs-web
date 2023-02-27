@@ -6,9 +6,11 @@ const sideMenuListPath = null;
 let localConfig = {};
 
 /**
- * @param {string} tag 
+ * @template {keyof HTMLElementTagNameMap} T
+ * @param {T} tag 
  * @param {string | Node | (string|Node)[]} [children] 
  * @param {object | function} [attrs]
+ * @returns {HTMLElementTagNameMap[T]}
  */
 function mkEl(tag, children, attrs) {
 	let el = document.createElement(tag);
@@ -109,10 +111,9 @@ class MediaPlayer {
 	}
 	_createEl(item, parent) {
 		let type = item.type.split('/', 2)[0];
-		let content;
 		if (type == 'image') {
 			this.el.classList.remove('playable');
-			content = mkEl('img', [], { src: item.url || '' });
+			let content = mkEl('img', [], { src: item.url || '' });
 			if (item.url == null && item.fetch) {
 				(async () => {
 					let url = URL.createObjectURL(await (await item.fetch()).blob());
@@ -128,12 +129,13 @@ class MediaPlayer {
 			content.addEventListener('error', (ev) => {
 				this.el.classList.remove('loading');
 			});
+			parent.append(content);
 		} else {
 			this.el.classList.add('playable');
-			let tag = type == 'audio' ? 'audio' : 'video';
+			const tag = type == 'audio' ? 'audio' : 'video';
+			const content = mkEl(tag, [], { controls: false, loop: this.loop, muted: this.muted, playbackRate: this.playbackRate });
 			// @ts-ignore
-			if (url == null && item.fetch && item.type.startsWith("video/mp4") && typeof MP4Player !== 'undefined') {
-				content = mkEl(tag, [], { controls: false, loop: this.loop, muted: this.muted, playbackRate: this.playbackRate });
+			if (item.url == null && item.fetch && item.type.startsWith("video/mp4") && typeof MP4Player !== 'undefined') {
 				let options = {
 					opener: {
 						async open(pos) { return (await item.fetch(pos)).body.getReader(); }
@@ -142,7 +144,7 @@ class MediaPlayer {
 				// @ts-ignore
 				new MP4Player(content).setBufferedReader(new BufferedReader(options));
 			} else {
-				content = mkEl(tag, [], { src: url, controls: false, loop: this.loop, muted: this.muted, playbackRate: this.playbackRate });
+				content.src = item.url;
 			}
 			content.addEventListener('loadeddata', (ev) => {
 				this.el.classList.remove('loading');
@@ -155,8 +157,8 @@ class MediaPlayer {
 			});
 			this.mediaEl = content;
 			content.play();
+			parent.append(content);
 		}
-		return parent.appendChild(content);
 	}
 	playPause() {
 		if (!this.mediaEl) return;
@@ -271,13 +273,13 @@ class FileListCursor {
 		let signal = this._ac.signal;
 		this._loader.load(this._offset, signal).then((r) => {
 			signal.throwIfAborted();
-			this._ac = null;
-			this._offset += r.items.length;
-			this.finished = r.next == null && !r.more;
+			this.finished = !r || r.next == null && !r.more;
+			this.loaded && this.loaded(r);
 			if (r.items) {
 				this.items = this.items.concat(r.items);
 			}
-			this.loaded && this.loaded(r);
+			this._offset += r.items.length;
+			this._ac = null;
 		});
 	}
 	current() {
@@ -650,12 +652,11 @@ class SideMenuListView {
 		});
 	}
 	loadItems(loader) {
-		loader.load(0).then((result) => {
+		loader.load(0, new AbortController().signal).then((result) => {
 			if (result && result.items) {
 				let field = 'updatedTime';
 				let items = result.items.sort(function (a, b) { return a[field] == b[field] ? 0 : (a[field] > b[field] ? 1 : -1) * -1 });
 				this.updateItems(items);
-				setError(null);
 			} else {
 				setError('Error');
 			}
@@ -789,6 +790,7 @@ class FileListView {
 	}
 
 	_refreshItems() {
+		setError(null);
 		this.listEl.textContent = '';
 		this.imageLoadQueue.clear();
 		this.listCursor.dispose();
@@ -806,7 +808,6 @@ class FileListView {
 			setError('Failed to load file list.');
 			return;
 		}
-		setError(null);
 		if (result.name) {
 			if (path.startsWith('tags/')) {
 				this.titleEl.innerText = result.name;
@@ -997,16 +998,14 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 		for (let i = 0; i < e.length; i++) {
 			e[i].href = e[i].href.replace(/#[^#]*$/, location.hash);
 		}
-		if (location.hash) {
-			let fragment = decodeURIComponent(location.hash.slice(1));
-			let m = fragment.match(/list:(.*)/)
-			if (m) {
-				fileListView.selectList(m[1]);
-				if (mediaPlayer.isFullSize()) {
-					mediaPlayer.hide();
-				}
-				return true;
+		let fragment = decodeURIComponent(location.hash.slice(1));
+		let m = fragment.match(/list:(.*)/)
+		if (m) {
+			fileListView.selectList(m[1]);
+			if (mediaPlayer.isFullSize()) {
+				mediaPlayer.hide();
 			}
+			return true;
 		} else {
 			fileListView.selectList(defaultListPath);
 		}

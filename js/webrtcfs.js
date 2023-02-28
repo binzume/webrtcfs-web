@@ -190,30 +190,16 @@ class FsClientConnection extends BaseConnection {
 class BaseFileList {
 	/**
 	 * @param {string} itemPath
-	 * @param {{[key:string]:string}?} options
 	 */
-	constructor(itemPath, options) {
+	constructor(itemPath) {
 		this.itemPath = itemPath;
-		this.options = options || {};
 		this.size = -1;
 		this.name = "";
 		/** @type {string} */
 		this.thumbnailUrl = null;
 		this.onupdate = null;
 	}
-
-	/**
-	 * @returns {Promise<void>}
-	 */
-	async init() {
-		await this.get(0)
-	}
-
-	/**
-	 * @returns {Promise<ContentInfo>}
-	 */
-	async get(position) {
-		throw 'not implemented';
+	async getItems(path, offset, limit, options = null, signal = null) {
 	}
 
 	notifyUpdate() {
@@ -224,8 +210,8 @@ class BaseFileList {
 }
 
 class StorageList extends BaseFileList {
-	constructor(accessors, options) {
-		super('', options);
+	constructor(accessors) {
+		super('');
 		this.accessors = accessors || {};
 		this.itemPath = '/';
 		this.name = "Storage";
@@ -245,27 +231,11 @@ class StorageList extends BaseFileList {
 					items.push({ name: n, type: 'folder', storage: k, path: sa.shortcuts[n], updatedTime: '' });
 				});
 			} else {
-				items.push({ name: sa.name, type: 'folder', storage: k, path: k, updatedTime: '' });
+				items.push({ name: sa.name, type: 'folder', storage: k, path: k, updatedTime: '', remove: () => this.removeStorage(k) });
 			}
 		}
 		this.items = items;
 		this.size = items.length;
-		let options = this.options;
-		if (options.orderBy) {
-			this._setSort(options.orderBy, options.order);
-		}
-	}
-	getList(path, options) {
-		let storage = path.split('/', 1)[0];
-		if (storage == '') {
-			return this;
-		}
-		path = path.substring(storage.length + 1);
-		let accessor = this.accessors[storage];
-		if (!accessor) {
-			return null;
-		}
-		return accessor.getList(path || accessor.root, options);
 	}
 	addStorage(id, data) {
 		this.accessors[id] = data;
@@ -280,8 +250,26 @@ class StorageList extends BaseFileList {
 		this.notifyUpdate();
 		return true;
 	}
-	get(position) {
-		return Promise.resolve(this.items[position]);
+	getFolder(path, prefix = '') {
+		if (!path) {
+			return this;
+		}
+		let storage = path.split('/', 1)[0];
+		path = path.substring(storage.length + 1);
+		let accessor = this.accessors[storage];
+		if (!accessor) {
+			return null;
+		}
+		return accessor.getFolder(path, prefix + storage + '/');
+	}
+	async getFiles(offset, limit, options = null, signal = null) {
+		if (options && options.sort) {
+			this._setSort(options.sort, options.sort.startsWith('-') ? 'd' : 'a');
+		}
+		return {
+			items: this.items.slice(offset, offset + limit),
+			next: offset + limit < this.items.length ? offset + limit : null,
+		};
 	}
 	_setSort(orderBy, order) {
 		let r = order === "a" ? 1 : -1;
@@ -299,39 +287,14 @@ class RtcfsFileListLoader {
 	constructor(path, storageList) {
 		this.path = path || '';
 		this.sortOrder = 'd';
-		this.sortField = 'updatedTime';
+		this.sortField = '';
 		this.storageList = storageList;
+		this.pageSize = 100;
 	}
-	async load(offset, signal) {
-		let path = this.path;
-		let storage = path.split('/', 1)[0];
-		let list = this.storageList.getList(path);
-		if (!list) {
-			return null;
-		}
-		let items = [];
-		let eol = false;
-		for (let i = 0; i < 100; i++) {
-			if (list.size >= 0 && offset + i >= list.size) {
-				eol = true;
-				break;
-			}
-			let item = await list.get(offset + i);
-			signal.throwIfAborted();
-			if (!item) {
-				eol = true;
-				break;
-			}
-			item.path = [storage, item.path].filter(p => p).join('/');
-			item.remove = () => this.storageList.removeStorage(item.name);
-			items.push(item);
-		}
-		this.offset = items.length;
-		return {
-			items: items,
-			writable: false,
-			next: eol ? null : (offset || 0) + items.length,
-		};
+	load(offset, signal) {
+		let options = this.sortField ? { sort: (this.sortOrder == 'd' ? '-' : '') + this.sortField } : null;
+		let folder = this.storageList.getFolder(this.path);
+		return folder.getFiles(offset, this.pageSize, options, signal);
 	}
 	getSubList(path) {
 		return new RtcfsFileListLoader(path, this.storageList);
@@ -350,9 +313,8 @@ class RtcfsFileListLoader {
 		storageList.addStorage(id, {
 			name: name,
 			root: '',
-			shortcuts: {},
 			detach: () => player && player.dispose(),
-			getList: (folder, options) => {
+			getFolder: (path, prefix) => {
 				if (player == null) {
 					player = new FsClientConnection(signalingUrl, signalingKey, roomId);
 					player.authToken = password;
@@ -375,11 +337,12 @@ class RtcfsFileListLoader {
 					};
 					player.connect();
 				}
-				return new RTCFileSystemClientFolder(client, folder, folder || name, options);
+				return new RTCFileSystemClientFolder(client, path, prefix);
 			}
 		});
 	}
 
+	// see https://github.com/binzume/webrtc-rdp
 	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || { devices: [] };
 	let devices = config.devices != null ? config.devices : [config];
 	for (let device of devices) {

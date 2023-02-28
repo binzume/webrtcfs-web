@@ -21,8 +21,8 @@ class RTCFileSystemClient {
         return await this._request({ op: 'stat', path: path });
     }
     /** @returns {Promise<RTCFileSystemFileStat[]>} */
-    async files(path, offset = 0, limit = -1) {
-        return await this._request({ op: 'files', path: path, p: offset, l: limit });
+    async files(path, offset = 0, limit = -1, options = null) {
+        return await this._request({ op: 'files', path: path, p: offset, l: limit, options: options });
     }
     /** @returns {Promise<ArrayBuffer>} */
     async read(path, offset, len) {
@@ -142,39 +142,57 @@ class RTCFileSystemClient {
 class RTCFileSystemClientFolder {
     /**
      * @param {RTCFileSystemClient} client 
-     * @param {string} name
      * @param {string} path 
-     * @param {Record<string, any>} options 
      */
-    constructor(client, path, name, options = {}) {
-        this.name = name;
-        this.path = path;
-        this.size = -1; // unknown size
+    constructor(client, path, prefix) {
         this._client = client;
-        this._options = options;
-        this._pageSize = 100;
-        this._pageCacheMax = 5;
-        /** @type {Map<number, {value?: RTCFileSystemClientFile[], task?: Promise<RTCFileSystemClientFile[]>, ac?: AbortController}>} */
-        this._pageCache = new Map();
+        this.path = path;
+        this.pathPrefix = prefix || '';
+        this.size = -1; // unknown size
         this.onupdate = null;
     }
 
-    async init() {
-        await this.get(0)
+    /** @returns {Promise<{items: RTCFileSystemClientFile[], next?: boolean}>} */
+    async getFiles(offset, limit, options = null, signal = null) {
+        let client = this._client;
+        await client.wait();
+        signal?.throwIfAborted();
+        let files = await client.files(this.path, offset, limit, options);
+        let dir = this.path != '' ? this.path + '/' : '';
+        let items = files.map(f => ({
+            name: f.name,
+            type: f.type == 'directory' ? 'folder' : f.type,
+            size: f.size,
+            updatedTime: f.updatedTime,
+            tags: f.metadata?.tags || [],
+            path: this.pathPrefix + dir + f.name,
+            async fetch(start = 0, end = -1) {
+                return new Response(client.readStream(dir + f.name, start, end < 0 ? f.size : end), { headers: { 'Content-Type': f.type, 'Content-Length': '' + f.size } });
+            },
+            update(blob) { return client.write(dir + f.name, 0, blob); },
+            remove() { return client.remove(dir + f.name); },
+            thumbnail: f.metadata?.thumbnail ? {
+                type: 'image/jpeg',
+                async fetch(start = 0, end = -1) {
+                    return new Response(client.readStream(dir + f.name + f.metadata?.thumbnail, start, end < 0 ? 32768 : end), { headers: { 'Content-Type': 'image/jpeg' } });
+                }
+            } : null,
+        }));
+        let sz = offset + items.length + (items.length >= limit ? 1 : 0);
+        if (sz > this.size) {
+            this.size = sz;
+            this.onupdate?.();
+        }
+        return {
+            items: items,
+            next: items.length >= limit ? offset + limit : null,
+        };
     }
 
-    /**
-     * @returns {Promise<RTCFileSystemClientFile>}
-     */
-    async get(position) {
-        if (position < 0 || this.size >= 0 && position >= this.size) throw "out of range";
-        let item = this._getOrNull(position);
-        if (item != null) {
-            return item;
-        }
-        let result = await this._load(position / this._pageSize | 0);
-        return result && result[position % this._pageSize];
+    async init() {
+        await this.getFiles(0, 1);
     }
+
     /**
      * @returns {string}
      */
@@ -182,82 +200,6 @@ class RTCFileSystemClientFolder {
         if (this.path == '' || this.path == '/') {
             return null;
         }
-        return this.path.substring(0, this.path.lastIndexOf('/'));
-    }
-    _getOrNull(position) {
-        let page = position / this._pageSize | 0;
-        let cache = this._pageCache.get(page);
-        if (cache) {
-            this._pageCache.delete(page);
-            this._pageCache.set(page, cache);
-            return cache.value?.[position - this._pageSize * page];
-        }
-        return null;
-    }
-
-    /** @returns {Promise<RTCFileSystemClientFile[]>} */
-    async _load(page) {
-        let cache = this._pageCache.get(page);
-        if (cache != null) {
-            return (cache.task) ? await cache.task : cache.value;;
-        }
-        for (const [p, c] of this._pageCache) {
-            if (this._pageCache.size < this._pageCacheMax) {
-                break;
-            }
-            console.log("invalidate: " + p, c.task != null);
-            this._pageCache.delete(p);
-            c.ac?.abort();
-        }
-
-        let ac = new AbortController();
-        let task = (async (signal) => {
-            await this._client.wait();
-            await new Promise((resolve) => setTimeout(resolve, this._pageCache.size));
-            console.log("fetch page:", page, signal.aborted);
-            if (signal.aborted) { throw 'abort'; }
-            let offset = page * this._pageSize;
-            let files = await this._client.files(this.path, offset, this._pageSize);
-
-            let dir = this.path != '' ? this.path + '/' : '';
-            let client = this._client;
-            let items = files.map(f => ({
-                name: f.name,
-                type: f.type == 'directory' ? 'folder' : f.type,
-                size: f.size,
-                updatedTime: f.updatedTime,
-                tags: f.metadata?.tags || [],
-                path: dir + f.name,
-                async fetch(start = 0, end = -1) {
-                    return new Response(client.readStream(dir + f.name, start, end < 0 ? f.size : end), { headers: { 'Content-Type': f.type, 'Content-Length': '' + f.size } });
-                },
-                update(blob) { return client.write(dir + f.name, 0, blob); },
-                remove() { return client.remove(dir + f.name); },
-                thumbnail: f.metadata?.thumbnail ? {
-                    type: 'image/jpeg',
-                    async fetch(start = 0, end = -1) {
-                        return new Response(client.readStream(dir + f.name + f.metadata?.thumbnail, start, end < 0 ? 32768 : end), { headers: { 'Content-Type': 'image/jpeg' } });
-                    }
-                } : null,
-            }));
-            return items;
-        })(ac.signal);
-        try {
-            this._pageCache.set(page, { task, ac });
-            let result = await task;
-            if (result.length > 0) {
-                let sz = page * this._pageSize + result.length + (result.length >= this._pageSize ? 1 : 0);
-                if (sz > this.size) {
-                    this.size = sz;
-                    this.onupdate?.();
-                }
-            }
-            if (this._pageCache.has(page)) {
-                this._pageCache.set(page, { value: result });
-            }
-            return result;
-        } catch (e) {
-            this._pageCache.delete(page);
-        }
+        return this.pathPrefix + this.path.substring(0, this.path.lastIndexOf('/'));
     }
 }

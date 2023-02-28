@@ -2,7 +2,7 @@
 
 const apiUrl = 'api/';
 const defaultListPath = '';
-const sideMenuListPath = null;
+const sideMenuListPath = '';
 let localConfig = {};
 
 /**
@@ -766,7 +766,7 @@ class FileListView {
 	}
 
 	selectList(path, title) {
-		document.getElementById('menu-pane').classList.remove('override_menu_visible');
+		path ||= defaultListPath;
 		this.listLoader.path = path;
 		let listTitleEl = this.titleEl;
 		let rawPath = decodeURIComponent(path);
@@ -991,9 +991,10 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	// Media player
 	let mediaPlayer = new MediaPlayer(document.getElementById('embed_player'));
 	mediaPlayerController.init(mediaPlayer);
-	let fileListView = new FileListView(globalThis.fileListLoader || new FileListLoader(defaultListPath));
+	let fileListView = new FileListView(globalThis.fileListLoader || new FileListLoader(''));
 
 	function checkUrlFragment() {
+		document.getElementById('menu-pane').classList.remove('override_menu_visible');
 		let e = document.getElementsByClassName('replaceUrlHash');
 		for (let i = 0; i < e.length; i++) {
 			e[i].href = e[i].href.replace(/#[^#]*$/, location.hash);
@@ -1007,7 +1008,7 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 			}
 			return true;
 		} else {
-			fileListView.selectList(defaultListPath);
+			fileListView.selectList('');
 		}
 		return false;
 	}

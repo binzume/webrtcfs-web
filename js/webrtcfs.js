@@ -263,48 +263,30 @@ class StorageList extends BaseFileList {
 		return accessor.getFolder(path, prefix + storage + '/');
 	}
 	async getFiles(offset, limit, options = null, signal = null) {
-		if (options && options.sort) {
-			this._setSort(options.sort, options.sort.startsWith('-') ? 'd' : 'a');
+		if (options && options.sortField) {
+			this._setSort(options.sortField, options.sortOrder);
 		}
+		limit ||= this.items.length;
 		return {
 			items: this.items.slice(offset, offset + limit),
 			next: offset + limit < this.items.length ? offset + limit : null,
 		};
 	}
-	_setSort(orderBy, order) {
+	_setSort(field, order) {
 		let r = order === "a" ? 1 : -1;
-		if (orderBy === "name") {
+		if (field === "name") {
 			this.items.sort((a, b) => (a.name || "").localeCompare(b.name) * r);
-		} else if (orderBy === "updatedTime") {
+		} else if (field === "updatedTime") {
 			this.items.sort((a, b) => (a.updatedTime || "").localeCompare(b.updatedTime) * r);
-		} else if (orderBy === "size") {
+		} else if (field === "size") {
 			this.items.sort((a, b) => ((a.size && b.size) ? a.size - b.size : 0) * r);
 		}
 	}
 }
 
-class RtcfsFileListLoader {
-	constructor(path, storageList) {
-		this.path = path || '';
-		this.sortOrder = 'd';
-		this.sortField = '';
-		this.storageList = storageList;
-		this.pageSize = 100;
-	}
-	load(offset, signal) {
-		let options = this.sortField ? { sort: (this.sortOrder == 'd' ? '-' : '') + this.sortField } : null;
-		let folder = this.storageList.getFolder(this.path);
-		return folder.getFiles(offset, this.pageSize, options, signal);
-	}
-	getSubList(path) {
-		return new RtcfsFileListLoader(path, this.storageList);
-	}
-}
-
 (function () {
 	let storageList = new StorageList(globalThis.storageAccessors);
-	globalThis.fileListLoader = new RtcfsFileListLoader('', storageList);
-	globalThis.sideMenuListLoader = new RtcfsFileListLoader('', storageList);
+	globalThis.folderResolver = storageList;
 
 	function add(roomId, signalingKey, password, name) {
 		let client = new RTCFileSystemClient();

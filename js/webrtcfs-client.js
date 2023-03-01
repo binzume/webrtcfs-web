@@ -153,11 +153,12 @@ class RTCFileSystemClientFolder {
     }
 
     /** @returns {Promise<{items: RTCFileSystemClientFile[], next?: boolean}>} */
-    async getFiles(offset, limit, options = null, signal = null) {
+    async getFiles(offset, limit = 100, options = null, signal = null) {
+		let filesopt = options && options.sortField ? { sort: (options.sortOrder == 'd' ? '-' : '') + options.sortField } : null;
         let client = this._client;
         await client.wait();
         signal?.throwIfAborted();
-        let files = await client.files(this.path, offset, limit, options);
+        let files = await client.files(this.path, offset, limit, filesopt);
         let dir = this.path != '' ? this.path + '/' : '';
         let items = files.map(f => ({
             name: f.name,

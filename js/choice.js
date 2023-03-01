@@ -1,8 +1,5 @@
 'use strict';
 
-const apiUrl = 'api/';
-const defaultListPath = '';
-const sideMenuListPath = '';
 let localConfig = {};
 
 /**
@@ -229,37 +226,14 @@ class MediaPlayer {
 	}
 }
 
-class FileListLoader {
-	constructor(path) {
-		this.path = path || '';
-		this.sortOrder = 'd';
-		this.sortField = 'updated';
-	}
-	async load(offset, signal) {
-		let url = this._url(offset);
-		let r = await (await fetch(url, { signal: signal })).json();
-		if (r.writable) {
-			for (let item of r.items) {
-				item.remove = () => fetch(apiUrl + item.path, { method: 'DELETE' });
-			}
-		}
-		return r;
-	}
-	getSubList(path) {
-		return new FileListLoader(path);
-	}
-	_url(offset) {
-		return apiUrl + this.path + '?offset=' + offset + '&order=' + this.sortOrder + '&orderBy=' + this.sortField;
-	}
-}
-
 class FileListCursor {
-	constructor(loader, filter) {
+	constructor(folder, filter, options = { sortField: 'updatedTime', sortOrder: 'd' }) {
+		this._folder = folder;
+		this._filter = filter;
+		this.options = options;
 		this.onselect = [];
 		this.loaded = null;
 		this.items = [];
-		this._loader = loader;
-		this._filter = filter;
 		this._pos = -1;
 		this.finished = false;
 		this._offset = 0;
@@ -271,7 +245,7 @@ class FileListCursor {
 		}
 		this._ac = new AbortController();
 		let signal = this._ac.signal;
-		this._loader.load(this._offset, signal).then((r) => {
+		this._folder.getFiles(this._offset, undefined, this.options, signal).then((r) => {
 			signal.throwIfAborted();
 			this.finished = !r || r.next == null && !r.more;
 			this.loaded && this.loaded(r);
@@ -621,7 +595,6 @@ class ContentInfoView {
 }
 
 let mediaPlayerController = new MediaPlayerController();
-let sideMenuListView = null;
 
 function isPlayable(item) {
 	let t = item.type.split('/')[0];
@@ -651,8 +624,8 @@ class SideMenuListView {
 			});
 		});
 	}
-	loadItems(loader) {
-		loader.load(0, new AbortController().signal).then((result) => {
+	loadItems(folder) {
+		folder.getFiles(0, undefined, {}, new AbortController().signal).then((result) => {
 			if (result && result.items) {
 				let field = 'updatedTime';
 				let items = result.items.sort(function (a, b) { return a[field] == b[field] ? 0 : (a[field] > b[field] ? 1 : -1) * -1 });
@@ -701,16 +674,16 @@ class SideMenuListView {
 
 class FileListView {
 	/**
-	 * @param {FileListLoader} listLoader 
+	 * @param {{getFolder:(path:string)=>FileListLoader}} folderResolver 
 	 */
-	constructor(listLoader) {
+	constructor(folderResolver) {
 		this.el = document.getElementById('main-pane');
 		this.listEl = document.getElementById('item-list');
 		this.titleEl = document.getElementById('item-list-title');
 
 		this.imageLoadQueue = new ImageLoadQueue(4);
-		this.listLoader = listLoader;
-		this.listCursor = new FileListCursor(this.listLoader, isPlayable);
+		this.folderResolver = folderResolver;
+		this.listCursor = new FileListCursor(null, isPlayable);
 
 		let onclick = (selector, f) => {
 			for (let el of document.querySelectorAll(selector)) {
@@ -718,13 +691,13 @@ class FileListView {
 			}
 		};
 		onclick('#sort-order-list button', (ev, el) => {
-			this.listLoader.sortField = ev.currentTarget.dataset.sortOrder;
+			this.listCursor.options.sortField = ev.currentTarget.dataset.sortOrder;
 			document.getElementById('item-sort-label').innerText = ev.currentTarget.innerText;
 			this._refreshItems();
 		});
 		onclick('#item-sort-order-button', (ev, el) => {
-			this.listLoader.sortOrder = this.listLoader.sortOrder == 'a' ? 'd' : 'a';
-			el.innerText = this.listLoader.sortOrder == 'a' ? '\u{2191}' : '\u{2193}';
+			this.listCursor.options.sortOrder = this.listCursor.options.sortOrder == 'a' ? 'd' : 'a';
+			el.innerText = this.listCursor.options.sortOrder == 'a' ? '\u{2191}' : '\u{2193}';
 			this._refreshItems();
 		});
 
@@ -766,15 +739,11 @@ class FileListView {
 	}
 
 	selectList(path, title) {
-		path ||= defaultListPath;
-		this.listLoader.path = path;
 		let listTitleEl = this.titleEl;
-		let rawPath = decodeURIComponent(path);
-		if (!rawPath.startsWith('tags/')) {
-			this.listLoader.path = rawPath;
+		if (!path.startsWith('tags/')) {
 			listTitleEl.innerText = '';
 			let pp = '';
-			let dirs = rawPath.split('/');
+			let dirs = path.split('/');
 			let name = dirs.pop();
 			dirs.forEach(function (p) {
 				pp += p;
@@ -786,15 +755,17 @@ class FileListView {
 		} else {
 			listTitleEl.innerText = decodeURIComponent(title || path.replace(/^\w+\//, ''));
 		}
+		this.path = path;
 		this._refreshItems();
 	}
 
 	_refreshItems() {
 		setError(null);
+		let folder = this.folderResolver.getFolder(this.path);
 		this.listEl.textContent = '';
 		this.imageLoadQueue.clear();
 		this.listCursor.dispose();
-		this.listCursor = new FileListCursor(this.listLoader, isPlayable);
+		this.listCursor = new FileListCursor(folder, isPlayable, this.listCursor.options);
 		mediaPlayerController.setCursor(this.listCursor);
 		this.el.classList.add('loading');
 		this.listCursor.loaded = r => this._onGetItemsResult(r);
@@ -802,14 +773,13 @@ class FileListView {
 	}
 
 	_onGetItemsResult(result) {
-		let path = this.listLoader.path;
 		this.el.classList.remove('loading');
 		if (!result || result.items == null) {
 			setError('Failed to load file list.');
 			return;
 		}
 		if (result.name) {
-			if (path.startsWith('tags/')) {
+			if (this.path.startsWith('tags/')) {
 				this.titleEl.innerText = result.name;
 			} else {
 				let links = this.titleEl.querySelectorAll('A,SPAN');
@@ -832,7 +802,6 @@ class FileListView {
 		if (f.thumbnail && f.thumbnail.fetch) {
 			this.imageLoadQueue.add(iconEl, async el => {
 				let url = URL.createObjectURL(await (await f.thumbnail.fetch()).blob());
-				console.log(url);
 				el.addEventListener('load', ev => URL.revokeObjectURL(url), { once: true });
 				el.src = url;
 			});
@@ -865,10 +834,8 @@ class FileListView {
 		if (f.type == 'folder' || f.type == 'archive' || f.type == 'list') {
 			let play = (ev) => {
 				ev.preventDefault();
-				let loader = this.listLoader.getSubList(f.path);
-				loader.sortField = 'name';
-				loader.sortOrder = 'a';
-				let cursor = new FileListCursor(loader, isPlayable);
+				let folder = this.folderResolver.getFolder(f.path);
+				let cursor = new FileListCursor(folder, isPlayable, { sortField: 'name', sortOrder: 'a' });
 				mediaPlayerController.setCursor(cursor);
 				cursor.loaded = (r) => cursor.moveOffset(1); // Play
 				cursor.loadNext();
@@ -926,7 +893,7 @@ class FileListView {
 
 	handleKeyEvent(ev) {
 		if (ev.code == 'KeyS' && ev.shiftKey) {
-			this.listLoader.sortOrder = this.listLoader.sortOrder == 'd' ? 'a' : 'd';
+			this.listCursor.options.sortOrder = this.listCursor.options.sortOrder == 'd' ? 'a' : 'd';
 			this._refreshItems();
 			return true;
 		}
@@ -934,7 +901,28 @@ class FileListView {
 	}
 }
 
-function search(text) {
+const apiUrl = 'api/';
+const defaultListPath = 'tags/.ALL_ITEMS';
+const sideMenuListPath = 'tags';
+
+class FileListLoader {
+	constructor(path) {
+		this.path = path || defaultListPath;
+	}
+	async getFiles(offset, limit, options, signal) {
+		let url = apiUrl + this.path + '?offset=' + offset + '&order=' + options.sortOrder + '&orderBy=' + options.sortField;
+		let r = await (await fetch(url, { signal: signal })).json();
+		if (r.writable) {
+			for (let item of r.items) {
+				item.remove = () => fetch(apiUrl + item.path, { method: 'DELETE' });
+			}
+		}
+		return r;
+	}
+}
+
+
+function search(text, targets) {
 	let normalize = function (s) {
 		return s.replace(/[\s　]+/, '').replace(/[－?―]/g, '-').replace(/[Ａ-Ｚａ-ｚ０-９]/g, function (s) {
 			return String.fromCharCode(s.charCodeAt(0) - 0xFEE0);
@@ -944,7 +932,7 @@ function search(text) {
 	if (text == '') return [];
 	let foundPrefix = [];
 	let found = [];
-	let searchItems = function (items) {
+	for (let items of targets) {
 		for (let i = 0; i < items.length; i++) {
 			let t = items[i];
 			let name = normalize(t.name);
@@ -955,9 +943,7 @@ function search(text) {
 				found.push(t);
 			}
 		}
-	};
-	searchItems(sideMenuListView.items);
-	mediaPlayerController.cursor && searchItems(mediaPlayerController.cursor.items);
+	}
 	return foundPrefix.concat(found);
 }
 
@@ -991,7 +977,7 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	// Media player
 	let mediaPlayer = new MediaPlayer(document.getElementById('embed_player'));
 	mediaPlayerController.init(mediaPlayer);
-	let fileListView = new FileListView(globalThis.fileListLoader || new FileListLoader(''));
+	let fileListView = new FileListView(globalThis.folderResolver || { getFolder: (path) => new FileListLoader(path) });
 
 	function checkUrlFragment() {
 		document.getElementById('menu-pane').classList.remove('override_menu_visible');
@@ -1030,8 +1016,8 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	}), false);
 
 	// Side menu
-	sideMenuListView = new SideMenuListView(document.getElementById('tag_list'));
-	sideMenuListView.loadItems(globalThis.sideMenuListLoader || new FileListLoader(sideMenuListPath));
+	let sideMenuListView = new SideMenuListView(document.getElementById('tag_list'));
+	sideMenuListView.loadItems(globalThis.folderResolver ? globalThis.folderResolver.getFolder('') : new FileListLoader(sideMenuListPath));
 
 	// Popup menu
 	let initPopup = function (buttonId, popupId, className) {
@@ -1067,12 +1053,12 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	searchInputEl.addEventListener('input', function (ev) {
 		clearTimeout(searchTimeout);
 		searchTimeout = setTimeout(function () {
-			updateSearchResult(search(searchInputEl.value));
+			updateSearchResult(search(searchInputEl.value, [sideMenuListView.items, mediaPlayerController.cursor.items || []]));
 		}, 300);
 	});
 	searchInputEl.addEventListener('focusin', function (ev) {
 		searchTimeout = setTimeout(function () {
-			updateSearchResult(search(searchInputEl.value));
+			updateSearchResult(search(searchInputEl.value, [sideMenuListView.items, mediaPlayerController.cursor.items || []]));
 		}, 300);
 	});
 	searchInputEl.addEventListener('focusout', function (ev) {

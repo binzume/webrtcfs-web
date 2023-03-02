@@ -1,7 +1,5 @@
 'use strict';
 
-let localConfig = {};
-
 /**
  * @template {keyof HTMLElementTagNameMap} T
  * @param {T} tag 
@@ -73,7 +71,6 @@ function initPinchZoom(el, minScale = 0.5, maxScale = 8) {
 }
 
 function setError(msg) {
-	// @ts-ignore
 	document.getElementById('error').textContent = msg ? msg : '';
 }
 
@@ -131,14 +128,12 @@ class MediaPlayer {
 			this.el.classList.add('playable');
 			const tag = type == 'audio' ? 'audio' : 'video';
 			const content = mkEl(tag, [], { controls: false, loop: this.loop, muted: this.muted, playbackRate: this.playbackRate });
-			// @ts-ignore
 			if (item.url == null && item.fetch && item.type.startsWith("video/mp4") && typeof MP4Player !== 'undefined') {
 				let options = {
 					opener: {
 						async open(pos) { return (await item.fetch(pos)).body.getReader(); }
 					}
 				};
-				// @ts-ignore
 				new MP4Player(content).setBufferedReader(new BufferedReader(options));
 			} else {
 				content.src = item.url;
@@ -227,34 +222,40 @@ class MediaPlayer {
 }
 
 class FileListCursor {
+	/**
+	 * @param {Folder} folder 
+	 * @param {(f:FileInfo)=>boolean} filter
+	 * @param {object} options 
+	 */
 	constructor(folder, filter, options = { sortField: 'updatedTime', sortOrder: 'd' }) {
 		this._folder = folder;
 		this._filter = filter;
 		this.options = options;
 		this.onselect = [];
+		/** @type {(r: FilesResult)=>any} */
 		this.loaded = null;
+		/** @type {FileInfo[]} */
 		this.items = [];
 		this._pos = -1;
 		this.finished = false;
 		this._offset = 0;
 		this._ac = null;
 	}
-	loadNext() {
+	async loadNext() {
 		if (this.finished || this._ac) {
 			return;
 		}
 		this._ac = new AbortController();
 		let signal = this._ac.signal;
-		this._folder.getFiles(this._offset, undefined, this.options, signal).then((r) => {
-			signal.throwIfAborted();
-			this.finished = !r || r.next == null && !r.more;
-			this.loaded && this.loaded(r);
-			if (r.items) {
-				this.items = this.items.concat(r.items);
-			}
+		let r = await this._folder.getFiles(this._offset, undefined, this.options, signal);
+		signal.throwIfAborted();
+		this.finished = !r || r.next == null && !r.more;
+		this.loaded && this.loaded(r);
+		if (r.items) {
+			this.items = this.items.concat(r.items);
 			this._offset += r.items.length;
-			this._ac = null;
-		});
+		}
+		this._ac = null;
 	}
 	current() {
 		return this.items[this._pos];
@@ -674,7 +675,7 @@ class SideMenuListView {
 
 class FileListView {
 	/**
-	 * @param {{getFolder:(path:string)=>FileListLoader}} folderResolver 
+	 * @param {FolderResolver} folderResolver 
 	 */
 	constructor(folderResolver) {
 		this.el = document.getElementById('main-pane');
@@ -700,6 +701,13 @@ class FileListView {
 			el.innerText = this.listCursor.options.sortOrder == 'a' ? '\u{2191}' : '\u{2193}';
 			this._refreshItems();
 		});
+
+		let localConfig = {};
+		try {
+			localConfig = JSON.parse(localStorage.getItem('localConfig') || '{}');
+		} catch (e) {
+			// ignore
+		}
 
 		if (localConfig.listMode) {
 			this.listEl.classList.remove('grid');
@@ -968,12 +976,6 @@ function updateSearchResult(items) {
 }
 
 window.addEventListener('DOMContentLoaded', (function (e) {
-	try {
-		localConfig = JSON.parse(localStorage.getItem('localConfig') || '{}');
-	} catch (e) {
-		// ignore
-	}
-
 	// Media player
 	let mediaPlayer = new MediaPlayer(document.getElementById('embed_player'));
 	mediaPlayerController.init(mediaPlayer);

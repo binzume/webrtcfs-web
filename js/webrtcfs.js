@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 // Please replace with your id and signalingKey!
@@ -39,6 +38,7 @@ class BaseConnection {
 	setupConnection() {
 		console.log("connecting..." + this.signalingUrl + " " + this.roomId);
 		this.updateState('connecting');
+		clearTimeout(this._connectTimer);
 		if (this.connectTimeoutMs > 0) {
 			this._connectTimer = setTimeout(() => this.disconnect(), this.connectTimeoutMs);
 		}
@@ -46,7 +46,7 @@ class BaseConnection {
 		let conn = this.conn = Ayame.connection(this.signalingUrl, this.roomId, this.options, false);
 		conn.on('open', async (e) => {
 			for (let c of Object.keys(this.dataChannels)) {
-				this.handleDataChannel(await conn.createDataChannel(c));
+				this._handleDataChannel(await conn.createDataChannel(c));
 			}
 			this.updateState('waiting');
 		});
@@ -55,7 +55,7 @@ class BaseConnection {
 			this.updateState('connected');
 		});
 		conn.on('datachannel', (channel) => {
-			this.handleDataChannel(channel);
+			this._handleDataChannel(channel);
 		});
 		conn.on('disconnect', (e) => {
 			this.conn = null;
@@ -76,7 +76,7 @@ class BaseConnection {
 			this.conn = null;
 		}
 		if (reason != 'dispose' && this.state != 'disconnected' && this.reconnectWaitMs >= 0) {
-			setTimeout(() => this.connect(), this.reconnectWaitMs);
+			this._connectTimer = setTimeout(() => this.connect(), this.reconnectWaitMs);
 		}
 		for (let c of Object.values(this.dataChannels)) {
 			c.ch = null;
@@ -104,17 +104,28 @@ class BaseConnection {
 	/**
 	 * @param {RTCDataChannel|null} ch
 	 */
-	handleDataChannel(ch) {
+	_handleDataChannel(ch) {
 		if (!ch) return;
 		let c = this.dataChannels[ch.label];
 		if (c && !c.ch) {
 			console.log('datachannel', ch.label);
 			c.ch = ch;
-			ch.onmessage = c.onmessage?.bind(ch, ch);
-			// NOTE: dataChannel.onclose = null in Ayame web sdk.
-			c.onopen && ch.addEventListener('open', c.onopen.bind(ch, ch));
-			c.onclose && ch.addEventListener('close', c.onclose.bind(ch, ch));
-		}
+            ch.onmessage = (ev) => c.onmessage?.(ch, ev);
+            // NOTE: dataChannel.onclose = null in Ayame web sdk.
+            ch.addEventListener('open', (ev) => c.onopen?.(ch, ev));
+            ch.addEventListener('close', (ev) => c.onclose?.(ch, ev));		}
+	}
+    getFingerprint(remote = false) {
+        let pc = this.conn._pc;
+        let m = pc && (remote ? pc.currentRemoteDescription : pc.currentLocalDescription).sdp.match(/a=fingerprint:\s*([\w-]+ [a-f0-9:]+)/i);
+        return m && m[1];
+    }
+	async hmacSha256(password, fingerprint) {
+		let enc = new TextEncoder();
+		let key = await crypto.subtle.importKey('raw', enc.encode(password),
+			{ name: 'HMAC', hash: { name: 'SHA-256' } }, false, ['sign']);
+		let sign = await crypto.subtle.sign('HMAC', key, enc.encode(fingerprint));
+		return btoa(String.fromCharCode(...new Uint8Array(sign)));
 	}
 }
 
@@ -131,26 +142,22 @@ class FsClientConnection extends BaseConnection {
 		this.onauth = null;
 		this.dataChannels['controlEvent'] = {
 			onopen: async (ch, ev) => {
-				if (this.authToken && this.conn._pc && window.crypto?.subtle) {
+				if (window.crypto?.subtle) {
 					// use HMAC
-					let m = this.conn._pc.currentLocalDescription.sdp.match(/a=fingerprint:\s*([\w-]+ [a-f0-9:]+)/i);
-					if (!m) {
+					let localFingerprint = this.getFingerprint();
+					if (!localFingerprint) {
 						console.log("Failed to get DTLS cert fingerprint");
 						return;
 					}
-					let localFingerprint = m[1];
 					console.log("local fingerprint:", localFingerprint);
-					let enc = new TextEncoder();
-					let key = await crypto.subtle.importKey('raw', enc.encode(this.authToken),
-						{ name: 'HMAC', hash: { name: 'SHA-256' } }, false, ['sign']);
-					let sign = await crypto.subtle.sign('HMAC', key, enc.encode(localFingerprint));
+					let hmac = this.authToken && await this.hmacSha256(this.authToken, localFingerprint);
 					ch.send(JSON.stringify({
 						type: "auth",
 						requestServices: ['file'],
 						fingerprint: localFingerprint,
-						hmac: btoa(String.fromCharCode(...new Uint8Array(sign)))
+						hmac: hmac,
 					}));
-				} else if (this.authToken) {
+				} else {
 					ch.send(JSON.stringify({ type: "auth", token: this.authToken, requestServices: ['file'] }));
 				}
 			},
@@ -313,7 +320,7 @@ class StorageList extends BaseFileList {
 						client.setAvailable(true);
 					};
 					player.onstatechange = (state, oldState, reason) => {
-						if (state == 'disconnected' && reason != 'redirect' && reason != 'dispose') {
+						if (state == 'disconnected' && reason != 'redirect') {
 							player = null;
 						}
 					};

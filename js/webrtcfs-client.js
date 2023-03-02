@@ -190,10 +190,6 @@ class RTCFileSystemClientFolder {
         };
     }
 
-    async init() {
-        await this.getFiles(0, 1);
-    }
-
     /**
      * @returns {string}
      */

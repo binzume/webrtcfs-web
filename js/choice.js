@@ -250,12 +250,12 @@ class FileListCursor {
 		let r = await this._folder.getFiles(this._offset, undefined, this.options, signal);
 		signal.throwIfAborted();
 		this.finished = !r || r.next == null && !r.more;
-		this.loaded && this.loaded(r);
-		if (r.items) {
+		this._ac = null;
+		if (r && r.items) {
 			this.items = this.items.concat(r.items);
 			this._offset += r.items.length;
 		}
-		this._ac = null;
+		this.loaded && this.loaded(r);
 	}
 	current() {
 		return this.items[this._pos];

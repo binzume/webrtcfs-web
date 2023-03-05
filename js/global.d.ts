@@ -16,14 +16,19 @@ declare interface FileInfo {
     type: string;
     name: string;
     size: number;
+    path: string;
+    updatedTime: number;
+    tags?: string[];
+    thumbnail?: { [k: string]: any };
     remove?(): any;
+    [k: string]: any;
 }
 
 declare interface FilesResult {
-    name: string;
+    name?: string;
     items: FileInfo[];
     next: any;
-    more: boolean;
+    more?: boolean;
 }
 
 declare interface Folder {
@@ -31,7 +36,8 @@ declare interface Folder {
 }
 
 declare interface FolderResolver {
-    getFolder(path: string): Folder;
+    getFolder(path: string, prefix?: string): Folder;
+    parsePath(path: string): string[][];
 }
 
 declare interface DataChannelInfo {
@@ -53,4 +59,4 @@ declare interface DeviceSettings {
 
 declare var MP4Player: any;
 declare var BufferedReader: any;
-declare var folderResolver: FolderResolver | null;
+declare var folderResolver: FolderResolver | undefined;

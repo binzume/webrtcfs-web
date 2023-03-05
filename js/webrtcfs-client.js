@@ -137,24 +137,26 @@ class RTCFileSystemClient {
     }
 }
 
-/** @typedef {{name: string, type: string, size: number, updatedTime: number, tags: string[], path:string, thumbnail:any, [k:string]: any}} RTCFileSystemClientFile */
-
+/**
+ * @implements {Folder}
+ */
 class RTCFileSystemClientFolder {
     /**
      * @param {RTCFileSystemClient} client 
      * @param {string} path 
+     * @param {string} prefix
      */
     constructor(client, path, prefix) {
         this._client = client;
         this.path = path;
-        this.pathPrefix = prefix || '';
+        this._pathPrefix = prefix || '';
         this.size = -1; // unknown size
         this.onupdate = null;
     }
 
-    /** @returns {Promise<{items: RTCFileSystemClientFile[], next?: boolean}>} */
+    /** @returns {Promise<{items: FileInfo[], next: number}>} */
     async getFiles(offset, limit = 100, options = null, signal = null) {
-		let filesopt = options && options.sortField ? { sort: (options.sortOrder == 'd' ? '-' : '') + options.sortField } : null;
+        let filesopt = options && options.sortField ? { sort: (options.sortOrder == 'd' ? '-' : '') + options.sortField } : null;
         let client = this._client;
         await client.wait();
         signal?.throwIfAborted();
@@ -166,7 +168,7 @@ class RTCFileSystemClientFolder {
             size: f.size,
             updatedTime: f.updatedTime,
             tags: f.metadata?.tags || [],
-            path: this.pathPrefix + dir + f.name,
+            path: this._pathPrefix + dir + f.name,
             async fetch(start = 0, end = -1) {
                 return new Response(client.readStream(dir + f.name, start, end < 0 ? f.size : end), { headers: { 'Content-Type': f.type, 'Content-Length': '' + f.size } });
             },
@@ -197,6 +199,6 @@ class RTCFileSystemClientFolder {
         if (this.path == '' || this.path == '/') {
             return null;
         }
-        return this.pathPrefix + this.path.substring(0, this.path.lastIndexOf('/'));
+        return this._pathPrefix + this.path.substring(0, this.path.lastIndexOf('/'));
     }
 }

@@ -406,7 +406,7 @@ class MediaPlayerController {
 				lastPosition = t;
 				seekBar.value = t;
 				seekBar.max = d;
-				positionEl.innerText = formatTime(t) + '/' + formatTime(d);
+				positionEl.textContent = formatTime(t) + '/' + formatTime(d);
 			}
 		}, 500);
 	}
@@ -518,12 +518,12 @@ class MediaPlayerController {
 			this.mediaPlayer.mediaEl.playbackRate = rate;
 		}
 		this._el('#player-playbackRate').value = rate;
-		this._el('#player-playbackRate-label').innerText = 'x' + rate.toFixed(1);
+		this._el('#player-playbackRate-label').textContent = 'x' + rate.toFixed(1);
 	}
 	dispose() {
 		clearInterval(this.intervalTimer);
 	}
-	/** @returns {HTMLElement} */
+	/** @returns {HTMLElement&{[k:string]:unknown}} */
 	_el(selector) {
 		return this.mediaPlayer.el.querySelector(selector);
 	}
@@ -585,7 +585,7 @@ class ContentInfoView {
 	setContent(content) {
 		this.contentEl.textContent = '';
 		let tags = (content.tags || []).map(function (t) { return mkEl('a', t, { href: '#list:tags/' + t }) });
-		this.nameEl.innerText = content.name;
+		this.nameEl.textContent = content.name;
 		this.contentEl.appendChild(mkEl('div', [
 			mkEl('div', 'Size: ' + formatSize(content.size), { title: content.size }),
 			mkEl('div', 'Type: ' + content.type),
@@ -693,12 +693,12 @@ class FileListView {
 		};
 		onclick('#sort-order-list button', (ev, el) => {
 			this.listCursor.options.sortField = ev.currentTarget.dataset.sortOrder;
-			document.getElementById('item-sort-label').innerText = ev.currentTarget.innerText;
+			document.getElementById('item-sort-label').textContent = ev.currentTarget.textContent;
 			this._refreshItems();
 		});
 		onclick('#item-sort-order-button', (ev, el) => {
 			this.listCursor.options.sortOrder = this.listCursor.options.sortOrder == 'a' ? 'd' : 'a';
-			el.innerText = this.listCursor.options.sortOrder == 'a' ? '\u{2191}' : '\u{2193}';
+			el.textContent = this.listCursor.options.sortOrder == 'a' ? '\u{2191}' : '\u{2193}';
 			this._refreshItems();
 		});
 
@@ -717,7 +717,7 @@ class FileListView {
 			this.listEl.classList.toggle('grid');
 			this.listEl.classList.toggle('simple');
 			localConfig.listMode = this.listEl.classList.contains('simple');
-			document.getElementById('item-list-mode-button').innerText = localConfig.listMode ? 'view_module' : 'view_list';
+			document.getElementById('item-list-mode-button').textContent = localConfig.listMode ? 'view_module' : 'view_list';
 			localStorage.setItem('localConfig', JSON.stringify(localConfig));
 		});
 
@@ -746,33 +746,29 @@ class FileListView {
 		}
 	}
 
-	selectList(path, title) {
+	selectList(path) {
 		let listTitleEl = this.titleEl;
-		if (!path.startsWith('tags/')) {
-			listTitleEl.innerText = '';
-			let pp = '';
-			let dirs = path.split('/');
-			let name = dirs.pop();
-			dirs.forEach(function (p) {
-				pp += p;
-				listTitleEl.appendChild(mkEl('a', p, { href: '#list:' + pp }));
-				listTitleEl.appendChild(document.createTextNode('>'));
-				pp += '/';
-			});
-			listTitleEl.appendChild(mkEl('span', name));
-		} else {
-			listTitleEl.innerText = decodeURIComponent(title || path.replace(/^\w+\//, ''));
-		}
+		listTitleEl.textContent = '';
+		let pp = '';
+		let dirs = this.folderResolver.parsePath(path);
+		let name = dirs.pop();
+		dirs.forEach(function (p) {
+			pp += p[0];
+			listTitleEl.appendChild(mkEl('a', p[1] || p[0], { href: '#list:' + pp }));
+			listTitleEl.appendChild(document.createTextNode('>'));
+			pp += '/';
+		});
+		listTitleEl.appendChild(mkEl('span', name[1] || name[0]));
 		this.path = path;
 		this._refreshItems();
 	}
 
 	_refreshItems() {
 		setError(null);
-		let folder = this.folderResolver.getFolder(this.path);
 		this.listEl.textContent = '';
 		this.imageLoadQueue.clear();
 		this.listCursor.dispose();
+		let folder = this.folderResolver.getFolder(this.path);
 		this.listCursor = new FileListCursor(folder, isPlayable, this.listCursor.options);
 		mediaPlayerController.setCursor(this.listCursor);
 		this.el.classList.add('loading');
@@ -787,14 +783,9 @@ class FileListView {
 			return;
 		}
 		if (result.name) {
-			if (this.path.startsWith('tags/')) {
-				this.titleEl.innerText = result.name;
-			} else {
-				let links = this.titleEl.querySelectorAll('A,SPAN');
-				let namePath = result.name.split('/');
-				if (namePath.length > 0 && links.length >= namePath.length) {
-					links[links.length - namePath.length].innerText = namePath[0];
-				}
+			let links = this.titleEl.querySelectorAll('A,SPAN');
+			if (links.length > 0) {
+				links[links.length - 1].textContent = result.name;
 			}
 		}
 
@@ -871,7 +862,6 @@ class FileListView {
 			el.append(optionButton);
 			optionButton.addEventListener('click', (ev) => {
 				ev.preventDefault();
-				/** @type {HTMLElement} */
 				let popupEl = mkEl('ul', optionEls, { className: 'popup' });
 				let rect = ev.currentTarget.getBoundingClientRect();
 				popupEl.style.top = rect.top;
@@ -979,14 +969,16 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	// Media player
 	let mediaPlayer = new MediaPlayer(document.getElementById('embed_player'));
 	mediaPlayerController.init(mediaPlayer);
-	let fileListView = new FileListView(globalThis.folderResolver || { getFolder: (path) => new FileListLoader(path) });
+	let fileListView = new FileListView(globalThis.folderResolver || {
+		getFolder: (path, prefix) => new FileListLoader(path),
+		parsePath: (path) => path.startsWith('tags/') ? [[path.substring(4)]] : path.split('/').map(p => [p]),
+	});
 
 	function checkUrlFragment() {
 		document.getElementById('menu-pane').classList.remove('override_menu_visible');
-		let e = document.getElementsByClassName('replaceUrlHash');
-		for (let i = 0; i < e.length; i++) {
-			e[i].href = e[i].href.replace(/#[^#]*$/, location.hash);
-		}
+		eachElements('.replaceUrlHash', el => {
+			el.href = el.href.replace(/#[^#]*$/, location.hash);
+		});
 		let fragment = decodeURIComponent(location.hash.slice(1));
 		let m = fragment.match(/list:(.*)/)
 		if (m) {

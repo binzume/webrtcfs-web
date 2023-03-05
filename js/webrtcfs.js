@@ -110,16 +110,17 @@ class BaseConnection {
 		if (c && !c.ch) {
 			console.log('datachannel', ch.label);
 			c.ch = ch;
-            ch.onmessage = (ev) => c.onmessage?.(ch, ev);
-            // NOTE: dataChannel.onclose = null in Ayame web sdk.
-            ch.addEventListener('open', (ev) => c.onopen?.(ch, ev));
-            ch.addEventListener('close', (ev) => c.onclose?.(ch, ev));		}
+			ch.onmessage = (ev) => c.onmessage?.(ch, ev);
+			// NOTE: dataChannel.onclose = null in Ayame web sdk.
+			ch.addEventListener('open', (ev) => c.onopen?.(ch, ev));
+			ch.addEventListener('close', (ev) => c.onclose?.(ch, ev));
+		}
 	}
-    getFingerprint(remote = false) {
-        let pc = this.conn._pc;
-        let m = pc && (remote ? pc.currentRemoteDescription : pc.currentLocalDescription).sdp.match(/a=fingerprint:\s*([\w-]+ [a-f0-9:]+)/i);
-        return m && m[1];
-    }
+	getFingerprint(remote = false) {
+		let pc = this.conn._pc;
+		let m = pc && (remote ? pc.currentRemoteDescription : pc.currentLocalDescription).sdp.match(/a=fingerprint:\s*([\w-]+ [a-f0-9:]+)/i);
+		return m && m[1];
+	}
 	async hmacSha256(password, fingerprint) {
 		let enc = new TextEncoder();
 		let key = await crypto.subtle.importKey('raw', enc.encode(password),
@@ -216,7 +217,14 @@ class BaseFileList {
 	}
 }
 
+/**
+ * @implements {FolderResolver}
+ * @implements {Folder}
+ */
 class StorageList extends BaseFileList {
+	/**
+	 * @param {Record<string, FolderResolver & {name: string, [k: string]: any;}>} accessors 
+	 */
 	constructor(accessors) {
 		super('');
 		this.accessors = accessors || {};
@@ -244,6 +252,10 @@ class StorageList extends BaseFileList {
 		this.items = items;
 		this.size = items.length;
 	}
+	/**
+	 * @param {string} id 
+	 * @param {FolderResolver & {name: string, [k: string]: any;}} data 
+	 */
 	addStorage(id, data) {
 		this.accessors[id] = data;
 		this._update();
@@ -261,13 +273,20 @@ class StorageList extends BaseFileList {
 		if (!path) {
 			return this;
 		}
-		let storage = path.split('/', 1)[0];
-		path = path.substring(storage.length + 1);
-		let accessor = this.accessors[storage];
-		if (!accessor) {
-			return null;
+		let [storage, spath] = this._splitPath(path);
+		return this.accessors[storage]?.getFolder(spath, prefix + storage + '/');
+	}
+	parsePath(path) {
+		if (!path) {
+			return [['', 'Storages']];
 		}
-		return accessor.getFolder(path, prefix + storage + '/');
+		let [storage, spath] = this._splitPath(path);
+		let acc = this.accessors[storage];
+		return [[storage, acc?.name]].concat(acc?.parsePath(spath) || []);
+	}
+	_splitPath(path) {
+		let storage = path.split('/', 1)[0];
+		return [storage, path.substring(storage.length + 1)];
 	}
 	async getFiles(offset, limit, options = null, signal = null) {
 		if (options && options.sortField) {
@@ -301,9 +320,8 @@ class StorageList extends BaseFileList {
 		let id = roomId.startsWith(roomIdPrefix) ? roomId.substring(roomIdPrefix.length) : roomId;
 		storageList.addStorage(id, {
 			name: name,
-			root: '',
 			detach: () => player && player.dispose(),
-			getFolder: (path, prefix) => {
+			getFolder(path, prefix) {
 				if (player == null) {
 					player = new FsClientConnection(signalingUrl, signalingKey, roomId);
 					player.authToken = password;
@@ -327,6 +345,9 @@ class StorageList extends BaseFileList {
 					player.connect();
 				}
 				return new RTCFileSystemClientFolder(client, path, prefix);
+			},
+			parsePath(path) {
+				return path ? path.split('/').map(p => [p]) : [];
 			}
 		});
 	}

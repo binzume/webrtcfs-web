@@ -282,6 +282,39 @@ header form {
 	display: none;
 }
 
+#file-info {
+	display: none;
+	position:sticky;
+	bottom: 0;
+	width: 100%;
+	height: 120pt;
+	padding: 2pt 8pt;
+	background-color: white;
+	border-top: 1px solid #ccc;
+	box-sizing: border-box;
+}
+
+#file-info.active {
+	display: block;
+}
+
+#file-info .close-button {
+	float: right;
+}
+
+#file-info a {
+	display: inline-block;
+	height: 18pt;
+	min-width: 24pt;
+	border: solid 1px #bbb;
+	color: #000000;
+	border-radius: 3pt;
+	text-align: center;
+	padding: 2pt;
+	margin: 1pt;
+	text-decoration: none;
+}
+
 .running {
 	color: green;
 }

@@ -682,6 +682,9 @@ class FileListView {
 		this.listEl = document.getElementById('item-list');
 		this.titleEl = document.getElementById('item-list-title');
 
+		this.infoView = new ContentInfoView();
+		this.infoView.init(document.getElementById('file-info'));
+
 		this.imageLoadQueue = new ImageLoadQueue(4);
 		this.folderResolver = folderResolver;
 		this.listCursor = new FileListCursor(null, isPlayable);
@@ -747,6 +750,7 @@ class FileListView {
 	}
 
 	selectList(path) {
+		this.infoView.show(false);
 		let listTitleEl = this.titleEl;
 		listTitleEl.textContent = '';
 		let pp = '';
@@ -823,7 +827,12 @@ class FileListView {
 				URL.revokeObjectURL(url);
 			})();
 		};
-		let onclick = function (ev) {
+		let onclick = (ev) => {
+			if (this.infoView.active) {
+				this.infoView.setContent(f);
+				ev.preventDefault();
+				return;
+			}
 			if (openItem(f)) {
 				ev.preventDefault();
 			} else if (!f.url && f.fetch) {
@@ -883,6 +892,14 @@ class FileListView {
 						f.remove();
 						el.parentNode.removeChild(el);
 					}
+				}
+			})));
+		}
+		if (optionEls.length > 0) {
+			optionEls.push(mkEl('li', mkEl('button', 'Info', {
+				onclick: () => {
+					this.infoView.setContent(f);
+					this.infoView.show(true);
 				}
 			})));
 		}

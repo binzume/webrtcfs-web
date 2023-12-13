@@ -315,6 +315,10 @@ header form {
 	text-decoration: none;
 }
 
+#item-list>li:hover {
+	background: #f4f4f4;
+}
+
 .running {
 	color: green;
 }

@@ -233,7 +233,8 @@ class FileServer {
                     socket.send(await new Blob([Uint32Array.from([0, cmd.rid]), data]).arrayBuffer()); //TODO: endian
                     break;
                 case 'write':
-                    let l = await fs.write(cmd.path, cmd.p, cmd.b);
+                    let buf = new Uint8Array([...atob(cmd.b)].map(s => s.charCodeAt(0)));
+                    let l = await fs.write(cmd.path, cmd.p, buf);
                     socket.send(JSON.stringify({ rid: cmd.rid, data: l }));
                     break;
                 case 'remove':

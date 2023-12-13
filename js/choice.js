@@ -238,7 +238,7 @@ class FileListCursor {
 		this.items = [];
 		this._pos = -1;
 		this.finished = false;
-		this._offset = 0;
+		this._next = null;
 		this._ac = null;
 	}
 	async loadNext() {
@@ -247,13 +247,13 @@ class FileListCursor {
 		}
 		this._ac = new AbortController();
 		let signal = this._ac.signal;
-		let r = await this._folder.getFiles(this._offset, undefined, this.options, signal);
+		let r = await this._folder.getFiles(this._next, undefined, this.options, signal);
 		signal.throwIfAborted();
 		this.finished = !r || r.next == null && !r.more;
 		this._ac = null;
 		if (r && r.items) {
 			this.items = this.items.concat(r.items);
-			this._offset += r.items.length;
+			this._next = r.next || this._next + r.items.length;
 		}
 		this.loaded && this.loaded(r);
 	}
@@ -675,9 +675,9 @@ class SideMenuListView {
 
 class FileListView {
 	/**
-	 * @param {FolderResolver} folderResolver 
+	 * @param {PathResolver} pathResolver 
 	 */
-	constructor(folderResolver) {
+	constructor(pathResolver) {
 		this.el = document.getElementById('main-pane');
 		this.listEl = document.getElementById('item-list');
 		this.titleEl = document.getElementById('item-list-title');
@@ -686,7 +686,7 @@ class FileListView {
 		this.infoView.init(document.getElementById('file-info'));
 
 		this.imageLoadQueue = new ImageLoadQueue(4);
-		this.folderResolver = folderResolver;
+		this.pathResolver = pathResolver;
 		this.listCursor = new FileListCursor(null, isPlayable);
 
 		let onclick = (selector, f) => {
@@ -734,6 +734,52 @@ class FileListView {
 				elem.scrollTop = savedScrollTop;
 			}
 		}, false);
+		this.el.addEventListener('dragover', ev => {
+			if (this.getCurrentFolder()?.writeFile) {
+				ev.preventDefault();
+			}
+		});
+		this.el.addEventListener('drop', ev => {
+			ev.preventDefault();
+			let tasks = [];
+			for (let file of ev.dataTransfer.files) {
+				tasks.push(this.getCurrentFolder().writeFile(file.name, file));
+			}
+			Promise.all(tasks).then(() => this._refreshItems());
+		});
+		document.querySelector('#file-add-button').addEventListener('click', (ev) => {
+			ev.preventDefault();
+			let folder = this.getCurrentFolder();
+			if (!folder || !folder.writeFile) {
+				return;
+			}
+			let inputEl = Object.assign(document.createElement('input'), {
+				type: `file`, multiple: true, style: "display:none", onchange: async () => {
+					let tasks = [];
+					for (let file of inputEl.files) {
+						tasks.push(folder.writeFile(file.name, file));
+					}
+					document.body.removeChild(inputEl);
+					await Promise.all(tasks);
+					this._refreshItems();
+				}
+			});
+			document.body.appendChild(inputEl).click();
+		});
+
+		document.querySelector('#file-mkdir-button').addEventListener('click', async (ev) => {
+			ev.preventDefault();
+			let folder = this.getCurrentFolder();
+			if (!folder || !folder.mkdir) {
+				return;
+			}
+			let dir = prompt('Folder name:');
+			if (!dir) {
+				return;
+			}
+			await folder.mkdir(dir);
+			this._refreshItems()
+		});
 	}
 
 	checkScroll() {
@@ -754,7 +800,7 @@ class FileListView {
 		let listTitleEl = this.titleEl;
 		listTitleEl.textContent = '';
 		let pp = '';
-		let dirs = this.folderResolver.parsePath(path);
+		let dirs = this.pathResolver.parsePath(path);
 		let name = dirs.pop();
 		dirs.forEach(function (p) {
 			pp += p[0];
@@ -767,15 +813,23 @@ class FileListView {
 		this._refreshItems();
 	}
 
+	getCurrentFolder() {
+		return this.listCursor._folder;
+	}
+
 	_refreshItems() {
 		setError(null);
 		this.listEl.textContent = '';
 		this.imageLoadQueue.clear();
 		this.listCursor.dispose();
-		let folder = this.folderResolver.getFolder(this.path);
+		this.el.classList.add('loading');
+		let folder = this.pathResolver.getFolder(this.path);
+		if (folder == null) {
+			return;
+		}
+		folder.writeFile ? this.el.classList.add('writable-folder') : this.el.classList.remove('writable-folder');
 		this.listCursor = new FileListCursor(folder, isPlayable, this.listCursor.options);
 		mediaPlayerController.setCursor(this.listCursor);
-		this.el.classList.add('loading');
 		this.listCursor.loaded = r => this._onGetItemsResult(r);
 		this.listCursor.loadNext();
 	}
@@ -842,7 +896,7 @@ class FileListView {
 		if (f.type == 'folder' || f.type == 'archive' || f.type == 'list') {
 			let play = (ev) => {
 				ev.preventDefault();
-				let folder = this.folderResolver.getFolder(f.path);
+				let folder = this.pathResolver.getFolder(f.path);
 				let cursor = new FileListCursor(folder, isPlayable, { sortField: 'name', sortOrder: 'a' });
 				mediaPlayerController.setCursor(cursor);
 				cursor.loaded = (r) => cursor.moveOffset(1); // Play
@@ -895,6 +949,17 @@ class FileListView {
 				}
 			})));
 		}
+		if (f.rename) {
+			optionEls.push(mkEl('li', mkEl('button', 'Rename', {
+				onclick: async () => {
+					let name = prompt('Rename', f.name);
+					if (name != f.name) {
+						await f.rename(name);
+						this._refreshItems();
+					}
+				}
+			})));
+		}
 		if (optionEls.length > 0) {
 			optionEls.push(mkEl('li', mkEl('button', 'Info', {
 				onclick: () => {
@@ -915,27 +980,6 @@ class FileListView {
 		return false;
 	}
 }
-
-const apiUrl = 'api/';
-const defaultListPath = 'tags/.ALL_ITEMS';
-const sideMenuListPath = 'tags';
-
-class FileListLoader {
-	constructor(path) {
-		this.path = path || defaultListPath;
-	}
-	async getFiles(offset, limit, options, signal) {
-		let url = apiUrl + this.path + '?offset=' + offset + '&order=' + options.sortOrder + '&orderBy=' + options.sortField;
-		let r = await (await fetch(url, { signal: signal })).json();
-		if (r.writable) {
-			for (let item of r.items) {
-				item.remove = () => fetch(apiUrl + item.path, { method: 'DELETE' });
-			}
-		}
-		return r;
-	}
-}
-
 
 function search(text, targets) {
 	let normalize = function (s) {
@@ -986,7 +1030,7 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	// Media player
 	let mediaPlayer = new MediaPlayer(document.getElementById('embed_player'));
 	mediaPlayerController.init(mediaPlayer);
-	let fileListView = new FileListView(globalThis.folderResolver || {
+	let fileListView = new FileListView(globalThis.pathResolver || {
 		getFolder: (path, prefix) => new FileListLoader(path),
 		parsePath: (path) => path.startsWith('tags/') ? [[path.substring(4)]] : path.split('/').map(p => [p]),
 	});
@@ -1028,7 +1072,7 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 
 	// Side menu
 	let sideMenuListView = new SideMenuListView(document.getElementById('tag_list'));
-	sideMenuListView.loadItems(globalThis.folderResolver ? globalThis.folderResolver.getFolder('') : new FileListLoader(sideMenuListPath));
+	sideMenuListView.loadItems(globalThis.pathResolver ? globalThis.pathResolver.getFolder('') : new FileListLoader(sideMenuListPath));
 
 	// Popup menu
 	let initPopup = function (buttonId, popupId, className) {
@@ -1051,6 +1095,7 @@ window.addEventListener('DOMContentLoaded', (function (e) {
 	initPopup('option-menu-button', 'option-menu', 'active');
 	initPopup('item-sort-button', 'sort-order-list', 'active');
 	initPopup('menu-sort-button', 'menu-sort-popup', 'active');
+	initPopup('add-item-button', 'add-item-list', 'active');
 	eachElements('#menu-hide-toggle', (el) => {
 		el.addEventListener('click', (ev) => {
 			ev.preventDefault();

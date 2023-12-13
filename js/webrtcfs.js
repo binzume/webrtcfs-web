@@ -312,7 +312,7 @@ class StorageList extends BaseFileList {
 
 (function () {
 	let storageList = new StorageList(globalThis.storageAccessors);
-	globalThis.folderResolver = storageList;
+	globalThis.pathResolver = storageList;
 
 	function add(roomId, signalingKey, password, name) {
 		let client = new RTCFileSystemClient();
@@ -346,9 +346,7 @@ class StorageList extends BaseFileList {
 				}
 				return new RTCFileSystemClientFolder(client, path, prefix);
 			},
-			parsePath(path) {
-				return path ? path.split('/').map(p => [p]) : [];
-			}
+			parsePath: (path) => path ? path.split('/').map(p => [p]) : [],
 		});
 	}
 

@@ -19,8 +19,12 @@ declare interface FileInfo {
     path: string;
     updatedTime: number;
     tags?: string[];
-    thumbnail?: { [k: string]: any };
-    remove?(): any;
+    thumbnail?: { type?: string, fetch?: () => Promise<Response>, [k: string]: any };
+    remove?(): Promise<any>;
+    rename?(name: string): Promise<any>;
+    fetch?(): Promise<Response>;
+    stream?(): Promise<ReadableStream>;
+    createWritable?(): Promise<WritableStream>;
     [k: string]: any;
 }
 
@@ -33,9 +37,14 @@ declare interface FilesResult {
 
 declare interface Folder {
     getFiles(offset: any, limit: number, options: object, signal: AbortSignal): Promise<FilesResult>;
+    getInfo?(): Promise<{ name: string, [k: string], any }>;
+    writeFile?(name: string, content: any): Promise<any>;
+    getParentPath(): string | null;
+    onupdate?: () => any;
+    sequentialAccess?: boolean;
 }
 
-declare interface FolderResolver {
+declare interface PathResolver {
     getFolder(path: string, prefix?: string): Folder;
     parsePath(path: string): string[][];
 }
@@ -59,4 +68,4 @@ declare interface DeviceSettings {
 
 declare var MP4Player: any;
 declare var BufferedReader: any;
-declare var folderResolver: FolderResolver | undefined;
+declare var pathResolver: PathResolver | undefined;

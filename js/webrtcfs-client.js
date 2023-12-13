@@ -1,5 +1,3 @@
-// @ts-check
-
 /** @typedef {{name: string, type: string, size: number, updatedTime: number, [k:string]: any}} RTCFileSystemFileStat */
 
 class RTCFileSystemClient {
@@ -32,6 +30,11 @@ class RTCFileSystemClient {
     async write(path, offset, data) {
         return await this._request({ op: 'write', path: path, p: offset, b: data });
     }
+    /** @returns {Promise<number>} */
+    async writeBytes(path, offset, data) {
+        let b64 = btoa(String.fromCharCode(...data));
+        return await this._request({ op: 'write', path: path, p: offset, b: b64 });
+    }
     /** @returns {Promise<boolean>} */
     async remove(path) {
         return await this._request({ op: 'remove', path: path });
@@ -48,7 +51,6 @@ class RTCFileSystemClient {
             }
         };
         return new ReadableStream({
-            // @ts-ignore
             type: 'bytes',
             start: (_controller) => {
                 for (let i = 0; i < 16; i++) {
@@ -64,6 +66,24 @@ class RTCFileSystemClient {
                 if (queue.length == 0) {
                     controller.close();
                 }
+            }
+        });
+    }
+
+    writeStream(path, pos = 0) {
+        const blockSize = 32768 / 4 * 3; // BASE64
+        return new WritableStream({
+            write: async (/** @type {Uint8Array&{type: string, [key:string]:any}} */ chunk, _controller) => {
+                if (chunk.type == 'seek') {
+                    pos = chunk.position;
+                    return;
+                }
+                let l = chunk.byteLength;
+                for (let p = 0; p < l; p += blockSize) {
+                    // TODO: prevent memcopy
+                    await this.writeBytes(path, pos + p, chunk.slice(p, p + blockSize));
+                }
+                pos += l;
             }
         });
     }
@@ -190,6 +210,11 @@ class RTCFileSystemClientFolder {
             items: items,
             next: items.length >= limit ? offset + limit : null,
         };
+    }
+
+    async writeFile(name, blob, options = {}) {
+        let path = (this.path != '' ? this.path + '/' : '') + name;
+        await blob.stream().pipeTo(this._client.writeStream(path));
     }
 
     /**

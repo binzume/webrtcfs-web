@@ -36,8 +36,16 @@ class RTCFileSystemClient {
         return await this._request({ op: 'write', path: path, p: offset, b: b64 });
     }
     /** @returns {Promise<boolean>} */
+    async truncate(path, pos) {
+        return await this._request({ op: 'truncate', path: path, p: pos });
+    }
+    /** @returns {Promise<boolean>} */
     async remove(path) {
         return await this._request({ op: 'remove', path: path });
+    }
+    /** @returns {Promise<boolean>} */
+    async mkdir(path) {
+        return await this._request({ op: 'mkdir', path: path });
     }
 
     readStream(path, pos, end) {
@@ -70,9 +78,15 @@ class RTCFileSystemClient {
         });
     }
 
-    writeStream(path, pos = 0) {
+    writeStream(path, options = {}) {
         const blockSize = 32768 / 4 * 3; // BASE64
+        let pos = options.start || 0;
         return new WritableStream({
+            start: async (_controller) => {
+                if (!options.keepExistingData) {
+                    this.truncate(path, 0);
+                }
+            },
             write: async (/** @type {Uint8Array&{type: string, [key:string]:any}} */ chunk, _controller) => {
                 if (chunk.type == 'seek') {
                     pos = chunk.position;

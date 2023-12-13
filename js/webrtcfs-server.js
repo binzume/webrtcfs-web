@@ -102,6 +102,14 @@ class FileSystemWrapper {
         await writer.close();
         return data.length;
     }
+    async truncate(path, size = 0) {
+        if (!this.writable) { throw 'readonly'; }
+        let handle = await this.resolvePath(path, 'file');
+        let writer = await handle.createWritable({ keepExistingData: true });
+        writer.truncate(size);
+        await writer.close();
+        return true;
+    }
     async remove(path) {
         if (!this.writable) { throw 'readonly'; }
         // TODO
@@ -236,6 +244,10 @@ class FileServer {
                     let buf = new Uint8Array([...atob(cmd.b)].map(s => s.charCodeAt(0)));
                     let l = await fs.write(cmd.path, cmd.p, buf);
                     socket.send(JSON.stringify({ rid: cmd.rid, data: l }));
+                    break;
+                case 'truncate':
+                    let r = await fs.truncate(cmd.path, cmd.p);
+                    socket.send(JSON.stringify({ rid: cmd.rid, data: r }));
                     break;
                 case 'remove':
                     socket.send(JSON.stringify({ rid: cmd.rid, data: await fs.remove(cmd.path) }));

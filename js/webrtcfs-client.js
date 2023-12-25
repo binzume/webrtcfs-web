@@ -8,7 +8,7 @@ class RTCFileSystemClient {
         this._onAvailable = null;
         this.disconnectDelayMs = 5000;
         this.ondisconnected = null;
-        this._disconnectTimer = 0;
+        this._disconnectTimer = null;
         this._seq = 0;
         /** @type {Record<string, {resolve:any, reject:any}>} */
         this._req = {};
@@ -44,6 +44,10 @@ class RTCFileSystemClient {
         return await this._request({ op: 'remove', path: path });
     }
     /** @returns {Promise<boolean>} */
+    async rename(path, path2) {
+        return await this._request({ op: 'rename', path: path, path2: path2 });
+    }
+    /** @returns {Promise<boolean>} */
     async mkdir(path) {
         return await this._request({ op: 'mkdir', path: path });
     }
@@ -59,6 +63,7 @@ class RTCFileSystemClient {
             }
         };
         return new ReadableStream({
+            // @ts-ignore
             type: 'bytes',
             start: (_controller) => {
                 for (let i = 0; i < 16; i++) {
@@ -195,26 +200,7 @@ class RTCFileSystemClientFolder {
         await client.wait();
         signal?.throwIfAborted();
         let files = await client.files(this.path, offset, limit, filesopt);
-        let dir = this.path != '' ? this.path + '/' : '';
-        let items = files.map(f => ({
-            name: f.name,
-            type: f.type == 'directory' ? 'folder' : f.type,
-            size: f.size,
-            updatedTime: f.updatedTime,
-            tags: f.metadata?.tags || [],
-            path: this._pathPrefix + dir + f.name,
-            async fetch(start = 0, end = -1) {
-                return new Response(client.readStream(dir + f.name, start, end < 0 ? f.size : end), { headers: { 'Content-Type': f.type, 'Content-Length': '' + f.size } });
-            },
-            update(blob) { return client.write(dir + f.name, 0, blob); },
-            remove() { return client.remove(dir + f.name); },
-            thumbnail: f.metadata?.thumbnail ? {
-                type: 'image/jpeg',
-                async fetch(start = 0, end = -1) {
-                    return new Response(client.readStream(dir + f.name + f.metadata?.thumbnail, start, end < 0 ? 32768 : end), { headers: { 'Content-Type': 'image/jpeg' } });
-                }
-            } : null,
-        }));
+        let items = files.map(f => this._procFile(f));
         let sz = offset + items.length + (items.length >= limit ? 1 : 0);
         if (sz > this.size) {
             this.size = sz;
@@ -225,10 +211,39 @@ class RTCFileSystemClientFolder {
             next: items.length >= limit ? offset + limit : null,
         };
     }
-
+    mkdir(name, options = {}) {
+        return this._client.mkdir((this.path != '' ? this.path + '/' : '') + name);
+    }
     async writeFile(name, blob, options = {}) {
         let path = (this.path != '' ? this.path + '/' : '') + name;
         await blob.stream().pipeTo(this._client.writeStream(path));
+    }
+    _procFile(f) {
+        let client = this._client;
+        let dir = this.path != '' ? this.path + '/' : '';
+        return ({
+            name: f.name,
+            type: f.type == 'directory' ? 'folder' : f.type,
+            size: f.size,
+            lastModified: f.updatedTime,
+            updatedTime: f.updatedTime,
+            tags: f.metadata?.tags || [],
+            path: this._pathPrefix + dir + f.name,
+            async stream(start = 0, end = -1) { return client.readStream(dir + f.name, start, end < 0 ? f.size : end); },
+            async createWritable(options = {}) { return client.writeStream(dir + f.name, options); },
+            async fetch(start = 0, end = -1) {
+                return new Response(client.readStream(dir + f.name, start, end < 0 ? f.size : end), { headers: { 'Content-Type': f.type, 'Content-Length': '' + f.size } });
+            },
+            update(blob) { return blob.stream().pipeTo(client.writeStream(dir + f.name)); },
+            remove() { return client.remove(dir + f.name); },
+            rename(name) { return client.rename(dir + f.name, dir + name); },
+            thumbnail: f.metadata?.thumbnail ? {
+                type: 'image/jpeg',
+                async fetch(start = 0, end = -1) {
+                    return new Response(client.readStream(dir + f.name + f.metadata?.thumbnail, start, end < 0 ? 32768 : end), { headers: { 'Content-Type': 'image/jpeg' } });
+                }
+            } : null,
+        });
     }
 
     /**
@@ -239,5 +254,102 @@ class RTCFileSystemClientFolder {
             return null;
         }
         return this._pathPrefix + this.path.substring(0, this.path.lastIndexOf('/'));
+    }
+}
+
+class RTCFileSystemManager {
+    constructor() {
+        /** @type {Record<string,RTCFileSystemClient>} */
+        this._clients = {};
+    }
+
+    /**
+     * @param {string} id host unique string (roomId)
+     * @param {string} name volume name
+     * @returns 
+     */
+    getRtcChannelSpec(id, name) {
+        return {
+            onopen: (ch, _ev) => {
+                ch.binaryType = 'arraybuffer';
+                if (!this._clients[id]) {
+                    this._clients[id] = new RTCFileSystemClient();
+                    console.log('FileSystemClient: connected ' + id);
+                    if (globalThis.storageAccessors) {
+                        globalThis.storageAccessors[id] = {
+                            name: name,
+                            root: '',
+                            getFolder: (path, prefix) => new RTCFileSystemClientFolder(this._clients[id], path, prefix),
+                            parsePath: (path) => path ? path.split('/').map(p => [p]) : [],
+                        };
+                    }
+                    this._clients[id].ondisconnected = () => {
+                        console.log('FileSystemClient: disconnected ' + id);
+                        this._clients[id].ondisconnected = null;
+                        delete this._clients[id];
+                        if (globalThis.storageAccessors) {
+                            delete globalThis.storageAccessors[id];
+                        }
+                    };
+                }
+                this._clients[id].addSocket(ch);
+            },
+            onclose: (ch, _ev) => {
+                this._clients[id]?.removeSocket(ch);
+            },
+            onmessage: (_ch, ev) => this._clients[id].handleEvent(ev)
+        };
+    }
+    static _registered = {};
+    registerAll(connectionFactory, roomIdPrefix = '') {
+        globalThis.storageAccessors ||= {};
+        function add(roomId, signalingKey, password, name) {
+            if (RTCFileSystemManager._registered[roomId]) {
+                return;
+            }
+            RTCFileSystemManager._registered[roomId] = true;
+            let client = new RTCFileSystemClient();
+            /** @type {FsClientConnection|null} */
+            let player = null;
+            let id = roomId.startsWith(roomIdPrefix) ? roomId.substring(roomIdPrefix.length) : roomId;
+            globalThis.storageAccessors[id] = {
+                name: name,
+                detach: () => player && player.dispose(),
+                getFolder(path, prefix) {
+                    if (player == null) {
+                        player = connectionFactory(signalingKey, roomId);
+                        player.authToken = password;
+                        player.dataChannels['fileServer'] = {
+                            onopen: (ch, _ev) => client.addSocket(ch, false),
+                            onclose: (ch, _ev) => client.removeSocket(ch),
+                            onmessage: (_ch, ev) => client.handleEvent(ev),
+                        };
+                        player.onauth = (ok) => {
+                            if (!ok) {
+                                player.disconnect();
+                                return;
+                            }
+                            client.setAvailable(true);
+                        };
+                        player.onstatechange = (state, oldState, reason) => {
+                            if (state == 'disconnected' && reason != 'redirect') {
+                                player = null;
+                            }
+                        };
+                        player.connect();
+                    }
+                    return new RTCFileSystemClientFolder(client, path, prefix);
+                },
+                parsePath: (path) => path ? path.split('/').map(p => [p]) : [],
+            };
+        }
+
+        // see https://github.com/binzume/webrtc-rdp
+        let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || { devices: [] };
+        let devices = config.devices != null ? config.devices : [config];
+        for (let device of devices) {
+            let name = (device.name || device.userAgent || device.roomId).substring(0, 64);
+            add(device.roomId, device.signalingKey, device.token, name);
+        }
     }
 }

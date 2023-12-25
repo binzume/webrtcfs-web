@@ -1,6 +1,5 @@
 'use strict';
 
-// Please replace with your id and signalingKey!
 const signalingUrl = 'wss://ayame-labo.shiguredo.app/signaling';
 const roomIdPrefix = 'binzume@rdp-room-';
 
@@ -194,167 +193,123 @@ class FsClientConnection extends BaseConnection {
 	}
 }
 
-
-class BaseFileList {
-	/**
-	 * @param {string} itemPath
-	 */
-	constructor(itemPath) {
-		this.itemPath = itemPath;
-		this.size = -1;
-		this.name = "";
-		/** @type {string} */
-		this.thumbnailUrl = null;
-		this.onupdate = null;
-	}
-	async getItems(path, offset, limit, options = null, signal = null) {
-	}
-
-	notifyUpdate() {
-		if (this.onupdate) {
-			this.onupdate();
-		}
-	}
-}
-
-/**
- * @implements {FolderResolver}
- * @implements {Folder}
- */
-class StorageList extends BaseFileList {
-	/**
-	 * @param {Record<string, FolderResolver & {name: string, [k: string]: any;}>} accessors 
-	 */
-	constructor(accessors) {
-		super('');
-		this.accessors = accessors || {};
-		this.itemPath = '/';
-		this.name = "Storage";
-		this._update();
-	}
-	_update() {
-		/**
-		 * @type {object[]}
-		 */
-		let items = [];
-		for (let [k, sa] of Object.entries(this.accessors)) {
-			if (sa == this) {
-				continue;
-			}
-			if (sa.shortcuts && Object.keys(sa.shortcuts).length) {
-				Object.keys(sa.shortcuts).forEach(n => {
-					items.push({ name: n, type: 'folder', storage: k, path: sa.shortcuts[n], updatedTime: '' });
-				});
-			} else {
-				items.push({ name: sa.name, type: 'folder', storage: k, path: k, updatedTime: '', remove: () => this.removeStorage(k) });
-			}
-		}
-		this.items = items;
-		this.size = items.length;
-	}
-	/**
-	 * @param {string} id 
-	 * @param {FolderResolver & {name: string, [k: string]: any;}} data 
-	 */
-	addStorage(id, data) {
-		this.accessors[id] = data;
-		this._update();
-		this.notifyUpdate();
-	}
-	removeStorage(id) {
-		if (!this.accessors[id]) { return false; }
-		this.accessors[id].detach && this.accessors[id].detach();
-		delete this.accessors[id];
-		this._update();
-		this.notifyUpdate();
-		return true;
-	}
-	getFolder(path, prefix = '') {
-		if (!path) {
-			return this;
-		}
-		let [storage, spath] = this._splitPath(path);
-		return this.accessors[storage]?.getFolder(spath, prefix + storage + '/');
-	}
-	parsePath(path) {
-		if (!path) {
-			return [['', 'Storages']];
-		}
-		let [storage, spath] = this._splitPath(path);
-		let acc = this.accessors[storage];
-		return [[storage, acc?.name]].concat(acc?.parsePath(spath) || []);
-	}
-	_splitPath(path) {
-		let storage = path.split('/', 1)[0];
-		return [storage, path.substring(storage.length + 1)];
-	}
-	async getFiles(offset, limit, options = null, signal = null) {
-		if (options && options.sortField) {
-			this._setSort(options.sortField, options.sortOrder);
-		}
-		limit ||= this.items.length;
-		return {
-			items: this.items.slice(offset, offset + limit),
-			next: offset + limit < this.items.length ? offset + limit : null,
-		};
-	}
-	_setSort(field, order) {
-		let r = order === "a" ? 1 : -1;
-		if (field === "name") {
-			this.items.sort((a, b) => (a.name || "").localeCompare(b.name) * r);
-		} else if (field === "updatedTime") {
-			this.items.sort((a, b) => (a.updatedTime || "").localeCompare(b.updatedTime) * r);
-		} else if (field === "size") {
-			this.items.sort((a, b) => ((a.size && b.size) ? a.size - b.size : 0) * r);
-		}
-	}
-}
-
 (function () {
-	let storageList = new StorageList(globalThis.storageAccessors);
-	globalThis.pathResolver = storageList;
 
-	function add(roomId, signalingKey, password, name) {
-		let client = new RTCFileSystemClient();
-		let player = null;
-		let id = roomId.startsWith(roomIdPrefix) ? roomId.substring(roomIdPrefix.length) : roomId;
-		storageList.addStorage(id, {
-			name: name,
-			detach: () => player && player.dispose(),
-			getFolder(path, prefix) {
-				if (player == null) {
-					player = new FsClientConnection(signalingUrl, signalingKey, roomId);
-					player.authToken = password;
-					player.dataChannels['fileServer'] = {
-						onopen: (ch, _ev) => client.addSocket(ch, false),
-						onclose: (ch, _ev) => client.removeSocket(ch),
-						onmessage: (_ch, ev) => client.handleEvent(ev),
-					};
-					player.onauth = (ok) => {
-						if (!ok) {
-							player.disconnect();
-							return;
-						}
-						client.setAvailable(true);
-					};
-					player.onstatechange = (state, oldState, reason) => {
-						if (state == 'disconnected' && reason != 'redirect') {
-							player = null;
-						}
-					};
-					player.connect();
+	class BaseFileList {
+		/**
+		 * @param {string} itemPath
+		 */
+		constructor(itemPath) {
+			this.itemPath = itemPath;
+			this.size = -1;
+			this.name = "";
+			/** @type {string} */
+			this.thumbnailUrl = null;
+			this.onupdate = null;
+		}
+		async getItems(path, offset, limit, options = null, signal = null) {
+		}
+
+		notifyUpdate() {
+			if (this.onupdate) {
+				this.onupdate();
+			}
+		}
+	}
+
+	/**
+	 * @implements {FolderResolver}
+	 * @implements {Folder}
+	 */
+	class StorageList extends BaseFileList {
+		/**
+		 * @param {Record<string, FolderResolver & {name: string, [k: string]: any;}>} accessors 
+		 */
+		constructor(accessors) {
+			super('');
+			this.accessors = accessors || {};
+			this.itemPath = '/';
+			this.name = "Storage";
+			this._update();
+		}
+		_update() {
+			/**
+			 * @type {object[]}
+			 */
+			let items = [];
+			for (let [k, sa] of Object.entries(this.accessors)) {
+				if (sa == this) {
+					continue;
 				}
-				return new RTCFileSystemClientFolder(client, path, prefix);
-			},
-			parsePath: (path) => path ? path.split('/').map(p => [p]) : [],
-		});
+				if (sa.shortcuts && Object.keys(sa.shortcuts).length) {
+					Object.keys(sa.shortcuts).forEach(n => {
+						items.push({ name: n, type: 'folder', storage: k, path: sa.shortcuts[n], updatedTime: '' });
+					});
+				} else {
+					items.push({ name: sa.name, type: 'folder', storage: k, path: k, updatedTime: '', remove: () => this.removeStorage(k) });
+				}
+			}
+			this.items = items;
+			this.size = items.length;
+		}
+		/**
+		 * @param {string} id 
+		 * @param {FolderResolver & {name: string, [k: string]: any;}} data 
+		 */
+		addStorage(id, data) {
+			this.accessors[id] = data;
+			this._update();
+			this.notifyUpdate();
+		}
+		removeStorage(id) {
+			if (!this.accessors[id]) { return false; }
+			this.accessors[id].detach && this.accessors[id].detach();
+			delete this.accessors[id];
+			this._update();
+			this.notifyUpdate();
+			return true;
+		}
+		getFolder(path, prefix = '') {
+			if (!path) {
+				return this;
+			}
+			let [storage, spath] = this._splitPath(path);
+			return this.accessors[storage]?.getFolder(spath, prefix + storage + '/');
+		}
+		parsePath(path) {
+			if (!path) {
+				return [['', 'Storages']];
+			}
+			let [storage, spath] = this._splitPath(path);
+			let acc = this.accessors[storage];
+			return [[storage, acc?.name]].concat(acc?.parsePath(spath) || []);
+		}
+		_splitPath(path) {
+			let storage = path.split('/', 1)[0];
+			return [storage, path.substring(storage.length + 1)];
+		}
+		async getFiles(offset, limit, options = null, signal = null) {
+			if (options && options.sortField) {
+				this._setSort(options.sortField, options.sortOrder);
+			}
+			limit ||= this.items.length;
+			return {
+				items: this.items.slice(offset, offset + limit),
+				next: offset + limit < this.items.length ? offset + limit : null,
+			};
+		}
+		_setSort(field, order) {
+			let r = order === "a" ? 1 : -1;
+			if (field === "name") {
+				this.items.sort((a, b) => (a.name || "").localeCompare(b.name) * r);
+			} else if (field === "updatedTime") {
+				this.items.sort((a, b) => (a.updatedTime || "").localeCompare(b.updatedTime) * r);
+			} else if (field === "size") {
+				this.items.sort((a, b) => ((a.size && b.size) ? a.size - b.size : 0) * r);
+			}
+		}
 	}
 
-	// see https://github.com/binzume/webrtc-rdp
-	let config = JSON.parse(localStorage.getItem('webrtc-rdp-settings') || 'null') || { devices: [] };
-	let devices = config.devices != null ? config.devices : [config];
-	for (let device of devices) {
-		let name = (device.name || device.userAgent || device.roomId).substring(0, 64);
-		add(device.roomId, device.signalingKey, device.token, name);
-	}
+	new RTCFileSystemManager().registerAll((key, id) => new FsClientConnection(signalingUrl, key, id), roomIdPrefix);
+	globalThis.pathResolver = new StorageList(globalThis.storageAccessors);
 })();
